@@ -75,7 +75,10 @@ async fn async_run() -> Result<()> {
     let _ = db.get("session/session.db").await;
     eprintln!("[daemon] 预热完成，联系人 {} 个", names.map.len());
 
-    let names_arc = Arc::new(std::sync::RwLock::new(names));
+    // 包一层内部 Arc：IPC 请求取 guard 后只做 Arc::clone（O(1)），
+    // 避免每次请求都全量 clone 几千个联系人的 HashMap。
+    // 用 tokio::sync::RwLock 允许 guard 跨 await（当前不跨，为未来 reload 留余地）。
+    let names_arc = Arc::new(tokio::sync::RwLock::new(Arc::new(names)));
 
     // 启动 IPC server（阻塞）
     server::serve(Arc::clone(&db), Arc::clone(&names_arc)).await?;
