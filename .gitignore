@@ -15,6 +15,9 @@ hook_start_output.txt
 hook_stderr.txt
 run_hook.bat
 
+# Rust
+target/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -106,6 +106,9 @@ wx sessions
 # 有未读消息的会话
 wx unread
 
+# 只看真人（私聊 + 群聊）的未读，过滤公众号与折叠入口
+wx unread --filter private,group
+
 # 上次检查后的新消息（增量）
 wx new-messages
 wx new-messages --json          # JSON 输出，适合 agent 解析
@@ -118,6 +121,17 @@ wx history "AI群" --since 2026-04-01 --until 2026-04-15 -n 100
 wx search "关键词"
 wx search "会议" --in "工作群" --since 2026-01-01
 ```
+
+`sessions` / `unread` / `history` / `new-messages` / `stats` 的输出都带 `chat_type` 字段，agent 可据此分流：
+
+| 取值 | 含义 | username 特征 |
+|------|------|--------------|
+| `private` | 真人私聊 | `wxid_*` 或自定义短号 |
+| `group` | 群聊 | `*@chatroom` |
+| `official_account` | 公众号 / 订阅号 / 服务号 / 系统通知 | `gh_*`、`biz_*`、`mphelper`、`qqsafe`、`@opencustomerservicemsg` |
+| `folded` | 折叠入口（订阅号折叠、折叠群聊的聚合条目） | `brandsessionholder`、`@placeholder_foldgroup` |
+
+`wx unread --filter` 支持 `private` / `group` / `official` / `folded` / `all`，逗号分隔多选。默认 `all`。
 
 ### 联系人与群组
 

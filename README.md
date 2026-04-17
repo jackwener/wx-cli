@@ -142,12 +142,15 @@ wx sessions
 ```bash
 wx sessions                                      # 最近 20 个会话
 wx unread                                        # 有未读消息的会话
+wx unread --filter private,group                 # 只看真人未读（过滤公众号/折叠入口）
 wx new-messages                                  # 上次检查后的新消息（增量）
 wx history "张三"                                # 最近 50 条记录
 wx history "AI群" --since 2026-04-01 --until 2026-04-15
 wx search "关键词"                               # 全库搜索
 wx search "会议" --in "工作群" --since 2026-01-01
 ```
+
+会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 
 ### 联系人 & 群组
 

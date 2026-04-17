@@ -126,6 +126,10 @@ enum Commands {
         /// 显示数量
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
+        /// 按会话类型过滤，逗号分隔。示例：--filter private,group 只看真人的未读
+        #[arg(long, value_name = "TYPES", value_delimiter = ',',
+              value_parser = ["all", "private", "group", "official", "folded"])]
+        filter: Vec<String>,
         /// 输出 JSON（默认 YAML）
         #[arg(long)]
         json: bool,
@@ -223,7 +227,7 @@ fn dispatch(cli: Cli) -> Result<()> {
         Commands::Export { chat, since, until, limit, format, output } => {
             export::cmd_export(chat, since, until, limit, format, output)
         }
-        Commands::Unread { limit, json } => unread::cmd_unread(limit, json),
+        Commands::Unread { limit, filter, json } => unread::cmd_unread(limit, filter, json),
         Commands::Members { chat, json } => members::cmd_members(chat, json),
         Commands::NewMessages { limit, json } => new_messages::cmd_new_messages(limit, json),
         Commands::Stats { chat, since, until, json } => {

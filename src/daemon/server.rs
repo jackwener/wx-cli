@@ -191,12 +191,12 @@ async fn dispatch(
                 Err(e) => Response::err(e.to_string()),
             }
         }
-        Unread { limit } => {
+        Unread { limit, filter } => {
             let names_snapshot = match clone_names(names) {
                 Ok(n) => n,
                 Err(e) => return Response::err(e),
             };
-            match query::q_unread(db, &names_snapshot, limit).await {
+            match query::q_unread(db, &names_snapshot, limit, filter).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
@@ -247,5 +247,6 @@ fn clone_names(names: &std::sync::RwLock<Names>) -> Result<Names, String> {
         map: guard.map.clone(),
         md5_to_uname: guard.md5_to_uname.clone(),
         msg_db_keys: guard.msg_db_keys.clone(),
+        verify_flags: guard.verify_flags.clone(),
     })
 }

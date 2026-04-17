@@ -46,6 +46,9 @@ pub enum Request {
     Unread {
         #[serde(default = "default_limit_20")]
         limit: usize,
+        /// 按会话类型过滤：private / group / official / folded / all，支持多选
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        filter: Option<Vec<String>>,
     },
     Members {
         chat: String,

@@ -14,6 +14,36 @@ fn msg_table_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"^Msg_[0-9a-f]{32}$").unwrap())
 }
 
+/// 判定会话类型。返回值固定为 `group` / `official_account` / `folded` / `private` 之一。
+///
+/// 判据次序：
+/// 1. `@chatroom` / 折叠入口特殊 username
+/// 2. `contact.verify_flag` 非 0 —— 覆盖所有被微信官方打了认证标的账号，
+///    包括 username 为 `wxid_*` 但实为公众号的情况（如"人物"），
+///    以及品牌服务号 `cmb4008205555`、系统号 `qqsafe` / `mphelper` 等
+/// 3. username 前缀兜底（`gh_*` / `biz_*` / `@*` 等）—— 在 contact 表未加载或没记录时
+///    仍能给出正确结果
+pub fn chat_type_of(username: &str, names: &Names) -> &'static str {
+    if username.contains("@chatroom") {
+        return "group";
+    }
+    if username == "brandsessionholder" || username == "@placeholder_foldgroup" {
+        return "folded";
+    }
+    if names.is_verified(username) {
+        return "official_account";
+    }
+    if username.starts_with("gh_") || username.starts_with("biz_") {
+        return "official_account";
+    }
+    // `@` 开头的剩余 username（如 `@opencustomerservicemsg`）是微信内部系统账号，
+    // 通常不落在 contact 表里，verify_flag 兜不住，按前缀兜底。
+    if username.starts_with('@') {
+        return "official_account";
+    }
+    "private"
+}
+
 /// 联系人名称缓存
 #[derive(Clone)]
 pub struct Names {
@@ -23,11 +53,18 @@ pub struct Names {
     pub md5_to_uname: HashMap<String, String>,
     /// 消息 DB 的相对路径列表（message/message_N.db）
     pub msg_db_keys: Vec<String>,
+    /// username -> contact.verify_flag（0=真人，非 0 通常为公众号/服务号/认证账号）
+    pub verify_flags: HashMap<String, i64>,
 }
 
 impl Names {
     pub fn display(&self, username: &str) -> String {
         self.map.get(username).cloned().unwrap_or_else(|| username.to_string())
+    }
+
+    /// 是否被微信官方标了认证/服务号 flag。未在 contact 表中的 username 返回 false。
+    pub fn is_verified(&self, username: &str) -> bool {
+        self.verify_flags.get(username).copied().unwrap_or(0) != 0
     }
 }
 
@@ -35,28 +72,31 @@ impl Names {
 pub async fn load_names(db: &DbCache) -> Result<Names> {
     let path = db.get("contact/contact.db").await?;
     let mut map = HashMap::new();
+    let mut verify_flags: HashMap<String, i64> = HashMap::new();
     if let Some(p) = path {
         let p2 = p.clone();
-        let rows: Vec<(String, String, String)> = tokio::task::spawn_blocking(move || {
+        let rows: Vec<(String, String, String, i64)> = tokio::task::spawn_blocking(move || {
             let conn = Connection::open(&p2).context("打开 contact.db 失败")?;
             let mut stmt = conn.prepare(
-                "SELECT username, nick_name, remark FROM contact"
+                "SELECT username, nick_name, remark, verify_flag FROM contact"
             )?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1).unwrap_or_default(),
                     row.get::<_, String>(2).unwrap_or_default(),
+                    row.get::<_, i64>(3).unwrap_or(0),
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok::<_, anyhow::Error>(rows)
         }).await??;
 
-        for (uname, nick, remark) in rows {
+        for (uname, nick, remark, vf) in rows {
             let display = if !remark.is_empty() { remark }
                 else if !nick.is_empty() { nick }
                 else { uname.clone() };
+            verify_flags.insert(uname.clone(), vf);
             map.insert(uname, display);
         }
     }
@@ -65,7 +105,7 @@ pub async fn load_names(db: &DbCache) -> Result<Names> {
         .map(|u| (format!("{:x}", md5::compute(u.as_bytes())), u.clone()))
         .collect();
 
-    Ok(Names { map, md5_to_uname, msg_db_keys: Vec::new() })
+    Ok(Names { map, md5_to_uname, msg_db_keys: Vec::new(), verify_flags })
 }
 
 /// 查询最近会话列表
@@ -102,7 +142,8 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
     let mut results = Vec::new();
     for (username, unread, summary_bytes, ts, msg_type, sender, sender_name) in rows {
         let display = names.display(&username);
-        let is_group = username.contains("@chatroom");
+        let chat_type = chat_type_of(&username, names);
+        let is_group = chat_type == "group";
 
         // 尝试 zstd 解压 summary
         let summary = decompress_or_str(&summary_bytes);
@@ -120,6 +161,7 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
             "chat": display,
             "username": username,
             "is_group": is_group,
+            "chat_type": chat_type,
             "unread": unread,
             "last_msg_type": fmt_type(msg_type),
             "last_sender": sender_display,
@@ -145,7 +187,8 @@ pub async fn q_history(
     let username = resolve_username(chat, names)
         .with_context(|| format!("找不到联系人: {}", chat))?;
     let display = names.display(&username);
-    let is_group = username.contains("@chatroom");
+    let chat_type = chat_type_of(&username, names);
+    let is_group = chat_type == "group";
 
     let tables = find_msg_tables(db, names, &username).await?;
     if tables.is_empty() {
@@ -182,6 +225,7 @@ pub async fn q_history(
         "chat": display,
         "username": username,
         "is_group": is_group,
+        "chat_type": chat_type,
         "count": paged.len(),
         "messages": paged,
     }))
@@ -779,39 +823,80 @@ fn fmt_time(ts: i64, fmt: &str) -> String {
 // ─── 新增命令查询函数 ──────────────────────────────────────────────────────────
 
 /// 查询有未读消息的会话
-pub async fn q_unread(db: &DbCache, names: &Names, limit: usize) -> Result<Value> {
+///
+/// `filter`：按 chat_type 过滤，None 或空 Vec 等价于 "all"。
+/// 可选值：`private` / `group` / `official` / `folded` / `all`。
+/// 多选支持在 CLI 层用逗号分隔后传入多个元素。
+pub async fn q_unread(
+    db: &DbCache,
+    names: &Names,
+    limit: usize,
+    filter: Option<Vec<String>>,
+) -> Result<Value> {
     let path = db.get("session/session.db").await?
         .context("无法解密 session.db")?;
 
+    // 归一化 filter：小写 + 去除别名。返回 None 代表"不过滤"。
+    let filter_set: Option<std::collections::HashSet<&'static str>> = filter.and_then(|v| {
+        let mut set = std::collections::HashSet::new();
+        for raw in v {
+            match raw.trim().to_lowercase().as_str() {
+                "" | "all" => return None,
+                "private" => { set.insert("private"); }
+                "group" => { set.insert("group"); }
+                "official" | "official_account" => { set.insert("official_account"); }
+                "folded" | "fold" => { set.insert("folded"); }
+                _ => {} // 未知值忽略，避免拼错导致什么都不返回
+            }
+        }
+        if set.is_empty() { None } else { Some(set) }
+    });
+
+    // 有 filter 时必须全表扫：SQL LIMIT 会把想要的公众号先筛掉。
+    // 无 filter 时保留 LIMIT，避免重度用户的大量未读会话拖慢默认路径。
+    let has_filter = filter_set.is_some();
     let limit_val = limit;
     let rows: Vec<(String, i64, Vec<u8>, i64, i64, String, String)> = tokio::task::spawn_blocking(move || {
         let conn = Connection::open(&path)?;
-        let mut stmt = conn.prepare(
+        let sql = if has_filter {
             "SELECT username, unread_count, summary, last_timestamp,
                     last_msg_type, last_msg_sender, last_sender_display_name
-             FROM SessionTable
-             WHERE unread_count > 0
+             FROM SessionTable WHERE unread_count > 0
+             ORDER BY last_timestamp DESC"
+        } else {
+            "SELECT username, unread_count, summary, last_timestamp,
+                    last_msg_type, last_msg_sender, last_sender_display_name
+             FROM SessionTable WHERE unread_count > 0
              ORDER BY last_timestamp DESC LIMIT ?"
-        )?;
-        let rows = stmt.query_map([limit_val as i64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, i64>(1).unwrap_or(0),
-                get_content_bytes(row, 2),
-                row.get::<_, i64>(3).unwrap_or(0),
-                row.get::<_, i64>(4).unwrap_or(0),
-                row.get::<_, String>(5).unwrap_or_default(),
-                row.get::<_, String>(6).unwrap_or_default(),
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let map_row = |row: &rusqlite::Row<'_>| Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1).unwrap_or(0),
+            get_content_bytes(row, 2),
+            row.get::<_, i64>(3).unwrap_or(0),
+            row.get::<_, i64>(4).unwrap_or(0),
+            row.get::<_, String>(5).unwrap_or_default(),
+            row.get::<_, String>(6).unwrap_or_default(),
+        ));
+        let rows = if has_filter {
+            stmt.query_map([], map_row)?.collect::<rusqlite::Result<Vec<_>>>()?
+        } else {
+            stmt.query_map([limit_val as i64], map_row)?.collect::<rusqlite::Result<Vec<_>>>()?
+        };
         Ok::<_, anyhow::Error>(rows)
     }).await??;
 
     let mut results = Vec::new();
     for (username, unread, summary_bytes, ts, msg_type, sender, sender_name) in rows {
+        let chat_type = chat_type_of(&username, names);
+        if let Some(ref set) = filter_set {
+            if !set.contains(chat_type) { continue; }
+        }
+        if results.len() >= limit { break; }
+
         let display = names.display(&username);
-        let is_group = username.contains("@chatroom");
+        let is_group = chat_type == "group";
         let summary = decompress_or_str(&summary_bytes);
         let summary = strip_group_prefix(&summary);
         let sender_display = if is_group && !sender.is_empty() {
@@ -825,6 +910,7 @@ pub async fn q_unread(db: &DbCache, names: &Names, limit: usize) -> Result<Value
             "chat": display,
             "username": username,
             "is_group": is_group,
+            "chat_type": chat_type,
             "unread": unread,
             "last_msg_type": fmt_type(msg_type),
             "last_sender": sender_display,
@@ -1059,7 +1145,8 @@ pub async fn q_new_messages(
         if tables.is_empty() { continue; }
 
         let display = names.display(uname);
-        let is_group = uname.contains("@chatroom");
+        let chat_type = chat_type_of(uname, names);
+        let is_group = chat_type == "group";
 
         for (db_path, table_name) in &tables {
             let path = db_path.clone();
@@ -1104,6 +1191,7 @@ pub async fn q_new_messages(
                         "chat": display2,
                         "username": uname2,
                         "is_group": is_group,
+                        "chat_type": chat_type,
                         "timestamp": ts,
                         "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
                         "sender": sender,
@@ -1259,7 +1347,8 @@ pub async fn q_stats(
     let username = resolve_username(chat, names)
         .with_context(|| format!("找不到联系人: {}", chat))?;
     let display = names.display(&username);
-    let is_group = username.contains("@chatroom");
+    let chat_type = chat_type_of(&username, names);
+    let is_group = chat_type == "group";
 
     let tables = find_msg_tables(db, names, &username).await?;
     if tables.is_empty() {
@@ -1405,6 +1494,7 @@ pub async fn q_stats(
         "chat": display,
         "username": username,
         "is_group": is_group,
+        "chat_type": chat_type,
         "total": total,
         "by_type": by_type,
         "top_senders": top_senders,

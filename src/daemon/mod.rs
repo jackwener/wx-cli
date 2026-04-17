@@ -66,6 +66,7 @@ async fn async_run() -> Result<()> {
             map: HashMap::new(),
             md5_to_uname: HashMap::new(),
             msg_db_keys: Vec::new(),
+            verify_flags: HashMap::new(),
         }
     });
     let mut names = names_raw;
