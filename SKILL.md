@@ -47,14 +47,35 @@ wx --version
 
 ## 初始化（首次使用，只需一次）
 
-**macOS** — 微信需要 ad-hoc 签名才能被扫描内存：
+### macOS（必须按顺序执行）
+
+**第一步：对 WeChat 重新签名**（只需做一次，WeChat 更新后需重做）
 
 ```bash
-sudo codesign --force --deep --sign - /Applications/WeChat.app
+codesign --force --deep --sign - /Applications/WeChat.app
+```
+
+如果报错 `signature in use` 或某个 dylib 签名损坏，先修复再签名：
+
+```bash
+codesign --remove-signature "/Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib"
+codesign --force --deep --sign - /Applications/WeChat.app
+```
+
+**第二步：重启 WeChat**
+
+```bash
+killall WeChat && open /Applications/WeChat.app
+# 等待微信完全登录后再继续
+```
+
+**第三步：初始化**
+
+```bash
 sudo wx init
 ```
 
-**Linux**：
+### Linux
 
 ```bash
 sudo wx init

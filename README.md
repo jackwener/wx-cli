@@ -97,9 +97,21 @@ cargo build --release
 **macOS**（需要先对微信做 ad-hoc 签名，才能扫描其内存）
 
 ```bash
-sudo codesign --force --deep --sign - /Applications/WeChat.app
+# 1. 签名（只需做一次，WeChat 更新后重做）
+codesign --force --deep --sign - /Applications/WeChat.app
+
+# 2. 重启微信，等待完全登录
+killall WeChat && open /Applications/WeChat.app
+
+# 3. 初始化
 sudo wx init
 ```
+
+> 如果 `codesign` 报 `signature in use`，先执行：
+> ```bash
+> codesign --remove-signature "/Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib"
+> codesign --force --deep --sign - /Applications/WeChat.app
+> ```
 
 **Linux**
 

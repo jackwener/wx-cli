@@ -110,7 +110,20 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
         let kr = task_for_pid(mach_task_self(), pid, &mut task);
         if kr != KERN_SUCCESS {
             bail!(
-                "task_for_pid 失败 (kr={})\n请确认：(1) 以 root 运行 (2) WeChat 已 ad-hoc 签名",
+                "task_for_pid 失败 (kr={})。请按以下步骤修复：\n\
+                \n\
+                  1. 对 WeChat 重新签名（只需做一次）：\n\
+                     codesign --force --deep --sign - /Applications/WeChat.app\n\
+                \n\
+                  2. 重启 WeChat：\n\
+                     killall WeChat && open /Applications/WeChat.app\n\
+                \n\
+                  3. 再次运行（需要 root）：\n\
+                     sudo wx init\n\
+                \n\
+                如果 codesign 报 \"signature in use\"，先执行：\n\
+                     codesign --remove-signature /Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib\n\
+                     codesign --force --deep --sign - /Applications/WeChat.app",
                 kr
             );
         }
