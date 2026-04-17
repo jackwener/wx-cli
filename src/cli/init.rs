@@ -44,6 +44,13 @@ pub fn cmd_init(force: bool) -> Result<()> {
     let entries = scanner::scan_keys(&db_dir)?;
 
     // Step 3: 保存 all_keys.json
+    // 先确保父目录存在（如 ~/.wx-cli/），避免首次运行时写入失败。
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("创建目录失败: {}", parent.display()))?;
+        chown_to_sudo_user(parent);
+    }
+
     let keys_file_path = config_path.parent()
         .unwrap_or(std::path::Path::new("."))
         .join("all_keys.json");
@@ -55,7 +62,8 @@ pub fn cmd_init(force: bool) -> Result<()> {
         }));
     }
     std::fs::write(&keys_file_path, serde_json::to_string_pretty(&keys_json)?)
-        .context("写入 all_keys.json 失败")?;
+        .with_context(|| format!("写入 all_keys.json 失败: {}", keys_file_path.display()))?;
+    chown_to_sudo_user(&keys_file_path);
     println!("成功提取 {} 个数据库密钥", entries.len());
     println!("密钥已保存: {}", keys_file_path.display());
 
@@ -75,18 +83,31 @@ pub fn cmd_init(force: bool) -> Result<()> {
     cfg.entry("keys_file".into()).or_insert_with(|| json!("all_keys.json"));
     cfg.entry("decrypted_dir".into()).or_insert_with(|| json!("decrypted"));
 
-    // 确保父目录存在（如 ~/.wx-cli/）
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("创建目录失败: {}", parent.display()))?;
-    }
     std::fs::write(&config_path, serde_json::to_string_pretty(&cfg)?)
-        .context("写入 config.json 失败")?;
+        .with_context(|| format!("写入 config.json 失败: {}", config_path.display()))?;
+    chown_to_sudo_user(&config_path);
     println!("配置已保存: {}", config_path.display());
     println!("初始化完成，可以使用 wx sessions / wx history 等命令了");
 
     Ok(())
 }
+
+/// 当通过 sudo 调用时，把刚写入的文件/目录归还给真实用户，否则后续以
+/// 普通用户身份运行的 daemon / CLI 无法读写它们。
+#[cfg(unix)]
+fn chown_to_sudo_user(path: &std::path::Path) {
+    let (Some(uid), Some(gid)) = (
+        std::env::var("SUDO_UID").ok().and_then(|s| s.parse::<u32>().ok()),
+        std::env::var("SUDO_GID").ok().and_then(|s| s.parse::<u32>().ok()),
+    ) else {
+        return;
+    };
+    // 静默忽略 chown 失败：路径可能在 root 拥有的卷上，或本身已属于该用户。
+    let _ = std::os::unix::fs::chown(path, Some(uid), Some(gid));
+}
+
+#[cfg(not(unix))]
+fn chown_to_sudo_user(_path: &std::path::Path) {}
 
 fn find_or_create_config_path() -> std::path::PathBuf {
     // 如果当前工作目录或可执行文件目录已有 config.json，沿用它（支持便携模式）

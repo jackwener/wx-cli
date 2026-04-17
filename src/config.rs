@@ -86,8 +86,30 @@ fn find_config_file() -> Result<PathBuf> {
     Ok(PathBuf::from("config.json"))
 }
 
-pub fn cli_dir() -> PathBuf {
+/// 真实用户的 home 目录。
+///
+/// 当通过 sudo 调用时，`dirs::home_dir()` 会返回 `/var/root`（或 `/root`），
+/// 导致 `~/.wx-cli/` 落在 root 名下，daemon 后续以普通用户身份启动时无法读写。
+/// 这里优先使用 sudo 注入的 `SUDO_USER` 反查真实用户的 home。
+pub fn effective_home() -> Option<PathBuf> {
+    if let Ok(sudo_user) = std::env::var("SUDO_USER") {
+        if !sudo_user.is_empty() && sudo_user != "root" {
+            #[cfg(target_os = "macos")]
+            let candidate = PathBuf::from("/Users").join(&sudo_user);
+            #[cfg(target_os = "linux")]
+            let candidate = PathBuf::from("/home").join(&sudo_user);
+            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+            let candidate = dirs::home_dir().unwrap_or_default();
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
     dirs::home_dir()
+}
+
+pub fn cli_dir() -> PathBuf {
+    effective_home()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join(".wx-cli")
 }

@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 
 /// wx — 微信本地数据 CLI
 #[derive(Parser)]
-#[command(name = "wx", version = "0.1.0", about = "wx — 微信本地数据 CLI")]
+#[command(name = "wx", version = env!("CARGO_PKG_VERSION"), about = "wx — 微信本地数据 CLI")]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
