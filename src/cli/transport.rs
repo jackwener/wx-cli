@@ -62,9 +62,46 @@ pub fn ensure_daemon() -> Result<()> {
     Ok(())
 }
 
+/// 启动 daemon 前检查 `~/.wx-cli/` 可写，给出比"超时"更明确的错误。
+///
+/// 典型坑：旧版本 `sudo wx init` 把目录留成 root 属主，非 root 的 daemon
+/// 连 socket/log 都建不了，会静默失败 15s 超时。
+fn preflight_cli_dir_writable() -> Result<()> {
+    let cli_dir = config::cli_dir();
+    std::fs::create_dir_all(&cli_dir)
+        .with_context(|| format!("创建 {} 失败", cli_dir.display()))?;
+
+    let probe = cli_dir.join(".daemon_probe");
+    match std::fs::File::create(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            let dir = cli_dir.display();
+            if cfg!(unix) {
+                bail!(
+                    "无法写入 {dir}（权限不足）\n\n\
+                     这通常是老版本的 `sudo wx init` 把目录属主留成了 root。\n\
+                     修复：\n\n    \
+                     sudo chown -R $(whoami) {dir}\n\n\
+                     （新版已修复此问题，下次 init 不会再发生）",
+                )
+            } else {
+                bail!("无法写入 {dir}: {e}")
+            }
+        }
+        Err(e) => bail!("无法写入 {}: {}", cli_dir.display(), e),
+    }
+}
+
 /// 启动 daemon 进程（自身二进制，设置 WX_DAEMON_MODE=1）
 fn start_daemon() -> Result<()> {
     let exe = std::env::current_exe().context("无法获取当前可执行文件路径")?;
+
+    // 预检：当前用户是否能写 ~/.wx-cli/。如果不能，给出可操作的错误信息，
+    // 而不是 spawn 一个注定失败的 daemon 然后超时 15s。
+    preflight_cli_dir_writable()?;
 
     #[cfg(unix)]
     {
