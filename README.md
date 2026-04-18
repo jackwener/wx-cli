@@ -173,7 +173,7 @@ wx sns-search "婚礼" --user "李四" --since 2023-01-01
 ```
 
 - **sns-notifications** 返回互动通知：`type`（`like`/`comment`）、`from_nickname`、`content`（评论正文）、`feed_preview` + `feed_author`（对应原帖）
-- **sns-feed** / **sns-search** 返回朋友圈帖子：`author`、`content`（正文）、`media_count`、`location`、`timestamp`
+- **sns-feed** / **sns-search** 返回朋友圈帖子：`author`、`content`（正文）、`media`、`media_count`、`location`、`timestamp`；`media` 字段含每张图的 url/thumb/key/token/md5/enc_idx/size，供下游做图片代理或离线渲染。`media_count = media.len()`，按 DOM 解析的合法 `<media>` 子节点计数（malformed XML 返回 0）
 
 朋友圈数据只覆盖你本地刷到过的帖子（微信 app 按需下载）。
 
