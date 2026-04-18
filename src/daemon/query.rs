@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{Local, TimeZone, Timelike};
 use regex::Regex;
+use roxmltree::{Document, Node};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -1634,12 +1635,6 @@ pub async fn q_sns_notifications(
     Ok(json!({ "notifications": out, "total": total }))
 }
 
-fn sns_media_count_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    // 只在 <mediaList> 里数 <media> 开标签，避免匹配到嵌套的其他 <media*> 字段
-    RE.get_or_init(|| Regex::new(r"<media>").unwrap())
-}
-
 fn sns_location_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // location 是自闭合标签，poiName 在属性里
@@ -1660,13 +1655,114 @@ fn escape_like_pattern(s: &str) -> String {
         .replace('_', r"\_")
 }
 
+fn xml_child<'a, 'input>(node: Node<'a, 'input>, tag: &str) -> Option<Node<'a, 'input>> {
+    node.children()
+        .find(|child| child.is_element() && child.has_tag_name(tag))
+}
+
+fn xml_text<'a, 'input>(node: Option<Node<'a, 'input>>) -> Option<String> {
+    node.and_then(|n| n.text())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn xml_attr<'a, 'input>(node: Option<Node<'a, 'input>>, attr: &str) -> Option<String> {
+    node.and_then(|n| n.attribute(attr))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn insert_media_string(out: &mut serde_json::Map<String, Value>, key: &str, value: Option<String>) {
+    if let Some(value) = value {
+        out.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn insert_media_i64(out: &mut serde_json::Map<String, Value>, key: &str, value: Option<i64>) {
+    if let Some(value) = value {
+        out.insert(key.to_string(), Value::from(value));
+    }
+}
+
+/// 从 `SnsTimeLine.content` XML 里抽每个 `<media>` 的完整字段。
+///
+/// 字段名与 artifacts 仓库 `wechat_sns_dump.py::_parse_media` 对齐，
+/// 便于跨实现 diff。缺失字段直接省略（不输出 null），供下游代理图片 / 离线渲染。
+fn parse_post_media(xml: &str) -> Vec<Value> {
+    let doc = match Document::parse(xml) {
+        Ok(doc) => doc,
+        Err(_) => return Vec::new(),
+    };
+
+    let Some(media_list) = doc
+        .descendants()
+        .find(|node| node.has_tag_name("TimelineObject"))
+        .and_then(|node| xml_child(node, "ContentObject"))
+        .and_then(|node| xml_child(node, "mediaList"))
+    else {
+        return Vec::new();
+    };
+
+    media_list
+        .children()
+        .filter(|node| node.is_element() && node.has_tag_name("media"))
+        .map(|media| {
+            let url_el = xml_child(media, "url");
+            let thumb_el = xml_child(media, "thumb");
+            let size_el = xml_child(media, "size");
+            let mut out = serde_json::Map::new();
+
+            insert_media_string(&mut out, "type", xml_text(xml_child(media, "type")));
+            insert_media_string(&mut out, "sub_type", xml_text(xml_child(media, "sub_type")));
+            insert_media_string(&mut out, "url", xml_text(url_el));
+            insert_media_string(&mut out, "thumb", xml_text(thumb_el));
+            insert_media_string(&mut out, "md5", xml_attr(url_el, "md5"));
+            insert_media_string(&mut out, "url_key", xml_attr(url_el, "key"));
+            insert_media_string(&mut out, "url_token", xml_attr(url_el, "token"));
+            insert_media_string(&mut out, "url_enc_idx", xml_attr(url_el, "enc_idx"));
+            insert_media_string(&mut out, "thumb_key", xml_attr(thumb_el, "key"));
+            insert_media_string(&mut out, "thumb_token", xml_attr(thumb_el, "token"));
+            insert_media_string(&mut out, "thumb_enc_idx", xml_attr(thumb_el, "enc_idx"));
+            insert_media_i64(
+                &mut out,
+                "width",
+                xml_attr(size_el, "width").and_then(|v| v.parse::<i64>().ok()),
+            );
+            insert_media_i64(
+                &mut out,
+                "height",
+                xml_attr(size_el, "height").and_then(|v| v.parse::<i64>().ok()),
+            );
+            insert_media_i64(
+                &mut out,
+                "total_size",
+                xml_attr(size_el, "totalSize").and_then(|v| v.parse::<i64>().ok()),
+            );
+            insert_media_string(
+                &mut out,
+                "video_md5",
+                xml_text(xml_child(media, "videomd5")),
+            );
+            insert_media_i64(
+                &mut out,
+                "video_duration",
+                xml_text(xml_child(media, "videoDuration")).and_then(|v| v.parse::<i64>().ok()),
+            );
+
+            Value::Object(out)
+        })
+        .collect()
+}
+
 /// SnsTimeLine 行解析产物。不含 display name（依赖 Names，需要出 spawn_blocking 再补）。
 struct ParsedPost {
     tid: i64,
     create_time: i64,
     author_username: String,
     content: String,
-    media_count: i64,
+    media: Vec<Value>,
     location: String,
 }
 
@@ -1682,13 +1778,13 @@ fn parse_post_xml(tid: i64, user_name_column: &str, content: &str) -> ParsedPost
     } else {
         user_name_column.to_string()
     };
-    let media_count = sns_media_count_re().find_iter(content).count() as i64;
+    let media = parse_post_media(content);
     let location = sns_location_re()
         .captures(content)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string())
         .unwrap_or_default();
-    ParsedPost { tid, create_time, author_username, content: text, media_count, location }
+    ParsedPost { tid, create_time, author_username, content: text, media, location }
 }
 
 fn post_to_value(p: ParsedPost, names: &Names) -> Value {
@@ -1704,7 +1800,8 @@ fn post_to_value(p: ParsedPost, names: &Names) -> Value {
         "author_username": p.author_username,
         "author": author,
         "content": p.content,
-        "media_count": p.media_count,
+        "media_count": p.media.len() as i64,
+        "media": p.media,
         "location": p.location,
     })
 }
@@ -1856,14 +1953,18 @@ mod sns_tests {
 
     fn make_post_xml(create_time: &str, desc: &str, username_tag: Option<&str>, media: usize, location: Option<&str>) -> String {
         let username = username_tag.map(|u| format!("<username>{}</username>", u)).unwrap_or_default();
-        let media_tags = "<media>...</media>".repeat(media);
-        let media_list = if media > 0 { format!("<mediaList>{}</mediaList>", media_tags) } else { String::new() };
+        let media_tags = "<media><type>2</type></media>".repeat(media);
+        let content_object = if media > 0 {
+            format!("<ContentObject><mediaList>{}</mediaList></ContentObject>", media_tags)
+        } else {
+            String::new()
+        };
         let loc = location
             .map(|p| format!(r#"<location poiName="{}" longitude="0" latitude="0" />"#, p))
             .unwrap_or_default();
         format!(
             "<TimelineObject>{}<createTime>{}</createTime><contentDesc>{}</contentDesc>{}{}</TimelineObject>",
-            username, create_time, desc, media_list, loc
+            username, create_time, desc, content_object, loc
         )
     }
 
@@ -1874,7 +1975,7 @@ mod sns_tests {
         assert_eq!(p.author_username, "wxid_column");
         assert_eq!(p.create_time, 1700000000);
         assert_eq!(p.content, "hello");
-        assert_eq!(p.media_count, 0);
+        assert_eq!(p.media.len(), 0);
         assert_eq!(p.location, "");
     }
 
@@ -1897,7 +1998,7 @@ mod sns_tests {
     fn parse_counts_media_and_extracts_location() {
         let xml = make_post_xml("1700000002", "post", None, 3, Some("Wuxi"));
         let p = parse_post_xml(4, "wxid", &xml);
-        assert_eq!(p.media_count, 3);
+        assert_eq!(p.media.len(), 3);
         assert_eq!(p.location, "Wuxi");
     }
 

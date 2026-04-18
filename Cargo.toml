@@ -52,6 +52,7 @@ md5 = "0.7"
 
 # 正则表达式
 regex = "1"
+roxmltree = "0.20"
 
 # IPC Windows named pipe（Unix 直接用 tokio::net::UnixListener）
 [target.'cfg(windows)'.dependencies]
