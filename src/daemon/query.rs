@@ -454,6 +454,19 @@ async fn find_msg_tables(
     Ok(results.into_iter().map(|(_, p, t)| (p, t)).collect())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AppMsgMeta {
+    title: String,
+    app_type: String,
+    url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MessageMeta {
+    content: String,
+    url: Option<String>,
+}
+
 fn query_messages(
     db_path: &std::path::Path,
     table: &str,
@@ -518,16 +531,17 @@ fn query_messages(
     for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
         let content = decompress_message(&content_bytes, ct);
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
-        let text = fmt_content(local_id, local_type, &content, is_group);
-
-        result.push(json!({
+        let MessageMeta { content, url } = message_meta(local_id, local_type, &content, is_group);
+        let mut row = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "sender": sender,
-            "content": text,
+            "content": content,
             "type": fmt_type(local_type),
             "local_id": local_id,
-        }));
+        });
+        insert_optional_url(&mut row, url);
+        result.push(row);
     }
     Ok(result)
 }
@@ -589,16 +603,17 @@ fn search_in_table(
     for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
         let content = decompress_message(&content_bytes, ct);
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
-        let text = fmt_content(local_id, local_type, &content, is_group);
-
-        result.push(json!({
+        let MessageMeta { content, url } = message_meta(local_id, local_type, &content, is_group);
+        let mut row = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "chat": "",
             "sender": sender,
-            "content": text,
+            "content": content,
             "type": fmt_type(local_type),
-        }));
+        });
+        insert_optional_url(&mut row, url);
+        result.push(row);
     }
     Ok(result)
 }
@@ -702,16 +717,22 @@ pub fn fmt_type(t: i64) -> String {
     }
 }
 
-fn fmt_content(local_id: i64, local_type: i64, content: &str, is_group: bool) -> String {
+fn message_meta(local_id: i64, local_type: i64, content: &str, is_group: bool) -> MessageMeta {
     let base = (local_type as u64 & 0xFFFFFFFF) as i64;
     match base {
-        3 => return format!("[图片] local_id={}", local_id),
-        34 => return "[语音]".into(),
-        43 => return "[视频]".into(),
-        47 => return "[表情]".into(),
-        50 => return "[通话]".into(),
-        10000 => return parse_sysmsg(content).unwrap_or_else(|| "[系统消息]".into()),
-        10002 => return parse_revoke(content).unwrap_or_else(|| "[撤回了一条消息]".into()),
+        3 => return MessageMeta { content: format!("[图片] local_id={}", local_id), url: None },
+        34 => return MessageMeta { content: "[语音]".into(), url: None },
+        43 => return MessageMeta { content: "[视频]".into(), url: None },
+        47 => return MessageMeta { content: "[表情]".into(), url: None },
+        50 => return MessageMeta { content: "[通话]".into(), url: None },
+        10000 => return MessageMeta {
+            content: parse_sysmsg(content).unwrap_or_else(|| "[系统消息]".into()),
+            url: None,
+        },
+        10002 => return MessageMeta {
+            content: parse_revoke(content).unwrap_or_else(|| "[撤回了一条消息]".into()),
+            url: None,
+        },
         _ => {}
     }
 
@@ -722,11 +743,15 @@ fn fmt_content(local_id: i64, local_type: i64, content: &str, is_group: bool) ->
     };
 
     if base == 49 && text.contains("<appmsg") {
-        if let Some(parsed) = parse_appmsg(text) {
-            return parsed;
+        if let Some(appmsg) = parse_appmsg_meta(text) {
+            return MessageMeta {
+                content: format_appmsg(&appmsg, text),
+                url: appmsg.url,
+            };
         }
     }
-    text.to_string()
+
+    MessageMeta { content: text.to_string(), url: None }
 }
 
 /// 解析撤回消息 XML，提取被撤回的内容摘要
@@ -760,19 +785,31 @@ fn parse_sysmsg(xml: &str) -> Option<String> {
     Some("[系统消息]".into())
 }
 
+fn parse_appmsg_meta(text: &str) -> Option<AppMsgMeta> {
+    Some(AppMsgMeta {
+        title: clean_xml_text(&extract_xml_text(text, "title")?),
+        app_type: clean_xml_text(&extract_xml_text(text, "type").unwrap_or_default()),
+        url: extract_xml_text(text, "url").and_then(|url| {
+            let url = unescape_html(&clean_xml_text(&url));
+            if url.is_empty() { None } else { Some(url) }
+        }),
+    })
+}
+
 fn parse_appmsg(text: &str) -> Option<String> {
-    // 简单 XML 解析，避免引入重量级 XML 库（或直接用 minidom）
-    // 这里用基本字符串搜索实现
-    let title = extract_xml_text(text, "title")?;
-    let atype = extract_xml_text(text, "type").unwrap_or_default();
-    match atype.as_str() {
-        "6" => Some(if !title.is_empty() { format!("[文件] {}", title) } else { "[文件]".into() }),
+    let appmsg = parse_appmsg_meta(text)?;
+    Some(format_appmsg(&appmsg, text))
+}
+
+fn format_appmsg(appmsg: &AppMsgMeta, text: &str) -> String {
+    match appmsg.app_type.as_str() {
+        "6" => {
+            if !appmsg.title.is_empty() { format!("[文件] {}", appmsg.title) } else { "[文件]".into() }
+        }
         "57" => {
             let ref_content = extract_xml_text(text, "content")
                 .map(|s| {
-                    // content 可能是 HTML 转义的 XML（被引用的消息是 appmsg 时）
                     let unescaped = unescape_html(&s);
-                    // 如果解转义后是 XML，尝试递归解析
                     if unescaped.contains("<appmsg") {
                         if let Some(parsed) = parse_appmsg(&unescaped) {
                             return parsed;
@@ -784,15 +821,19 @@ fn parse_appmsg(text: &str) -> Option<String> {
                     } else { s }
                 })
                 .unwrap_or_default();
-            let quote = if !title.is_empty() { format!("[引用] {}", title) } else { "[引用]".into() };
+            let quote = if !appmsg.title.is_empty() { format!("[引用] {}", appmsg.title) } else { "[引用]".into() };
             if !ref_content.is_empty() {
-                Some(format!("{}\n  \u{21b3} {}", quote, ref_content))
+                format!("{}\n  \u{21b3} {}", quote, ref_content)
             } else {
-                Some(quote)
+                quote
             }
         }
-        "33" | "36" | "44" => Some(if !title.is_empty() { format!("[小程序] {}", title) } else { "[小程序]".into() }),
-        _ => Some(if !title.is_empty() { format!("[链接] {}", title) } else { "[链接/文件]".into() }),
+        "33" | "36" | "44" => {
+            if !appmsg.title.is_empty() { format!("[小程序] {}", appmsg.title) } else { "[小程序]".into() }
+        }
+        _ => {
+            if !appmsg.title.is_empty() { format!("[链接] {}", appmsg.title) } else { "[链接/文件]".into() }
+        }
     }
 }
 
@@ -811,6 +852,86 @@ fn unescape_html(s: &str) -> String {
      .replace("&amp;", "&")
      .replace("&quot;", "\"")
      .replace("&apos;", "'")
+}
+
+fn clean_xml_text(s: &str) -> String {
+    let trimmed = s.trim();
+    if let Some(inner) = trimmed.strip_prefix("<![CDATA[").and_then(|v| v.strip_suffix("]]>") ) {
+        inner.trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn insert_optional_url(row: &mut Value, url: Option<String>) {
+    if let (Some(obj), Some(url)) = (row.as_object_mut(), url) {
+        obj.insert("url".into(), Value::String(url));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{insert_optional_url, message_meta, parse_appmsg, parse_appmsg_meta};
+    use serde_json::json;
+
+    #[test]
+    fn extracts_url_from_link_appmsg() {
+        let xml = r#"<appmsg><title>测试文章</title><type>5</type><url>https://mp.weixin.qq.com/s/test</url></appmsg>"#;
+        let meta = parse_appmsg_meta(xml).expect("should parse appmsg meta");
+        assert_eq!(meta.url.as_deref(), Some("https://mp.weixin.qq.com/s/test"));
+        assert_eq!(parse_appmsg(xml).as_deref(), Some("[链接] 测试文章"));
+    }
+
+    #[test]
+    fn keeps_none_when_url_missing() {
+        let xml = r#"<appmsg><title>只有标题</title><type>5</type></appmsg>"#;
+        let meta = parse_appmsg_meta(xml).expect("should parse appmsg meta");
+        assert_eq!(meta.url, None);
+        assert_eq!(parse_appmsg(xml).as_deref(), Some("[链接] 只有标题"));
+    }
+
+    #[test]
+    fn keeps_file_message_format() {
+        let xml = r#"<appmsg><title>附件.pdf</title><type>6</type><url>https://example.com/file</url></appmsg>"#;
+        assert_eq!(parse_appmsg(xml).as_deref(), Some("[文件] 附件.pdf"));
+    }
+
+    #[test]
+    fn keeps_quote_message_format() {
+        let xml = r#"<appmsg><title>引用标题</title><type>57</type><content>Hello world</content></appmsg>"#;
+        let rendered = parse_appmsg(xml).expect("should parse quote appmsg");
+        assert!(rendered.starts_with("[引用] 引用标题"));
+        assert!(rendered.contains("↳ Hello world"));
+    }
+
+    #[test]
+    fn extracts_url_after_group_prefix_removed() {
+        let content = "wxid_group_member:\n<appmsg><title>群文章</title><type>5</type><url>https://mp.weixin.qq.com/s/group</url></appmsg>";
+        let message = message_meta(42, 49, content, true);
+        assert_eq!(message.content, "[链接] 群文章");
+        assert_eq!(message.url.as_deref(), Some("https://mp.weixin.qq.com/s/group"));
+    }
+
+    #[test]
+    fn unescapes_html_entities_in_url() {
+        let xml = r#"<appmsg><title>测试文章</title><type>5</type><url><![CDATA[https://mp.weixin.qq.com/s/test?a=1&amp;b=2]]></url></appmsg>"#;
+        let meta = parse_appmsg_meta(xml).expect("should parse appmsg meta");
+        assert_eq!(meta.url.as_deref(), Some("https://mp.weixin.qq.com/s/test?a=1&b=2"));
+    }
+
+    #[test]
+    fn omits_url_field_when_absent() {
+        let mut row = json!({ "content": "hello" });
+        insert_optional_url(&mut row, None);
+        assert!(row.get("url").is_none());
+    }
+
+    #[test]
+    fn inserts_url_field_when_present() {
+        let mut row = json!({ "content": "hello" });
+        insert_optional_url(&mut row, Some("https://example.com".into()));
+        assert_eq!(row.get("url").and_then(|v| v.as_str()), Some("https://example.com"));
+    }
 }
 
 fn fmt_time(ts: i64, fmt: &str) -> String {
@@ -1186,8 +1307,8 @@ pub async fn q_new_messages(
                 for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
                     let content = decompress_message(&content_bytes, ct);
                     let sender = sender_label(real_sender_id, &content, is_group, &uname2, &id2u, &names_map);
-                    let text = fmt_content(local_id, local_type, &content, is_group);
-                    result.push(json!({
+                    let MessageMeta { content, url } = message_meta(local_id, local_type, &content, is_group);
+                    let mut row = json!({
                         "chat": display2,
                         "username": uname2,
                         "is_group": is_group,
@@ -1195,9 +1316,11 @@ pub async fn q_new_messages(
                         "timestamp": ts,
                         "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
                         "sender": sender,
-                        "content": text,
+                        "content": content,
                         "type": fmt_type(local_type),
-                    }));
+                    });
+                    insert_optional_url(&mut row, url);
+                    result.push(row);
                 }
                 Ok::<_, anyhow::Error>(result)
             }).await {
@@ -1501,4 +1624,3 @@ pub async fn q_stats(
         "by_hour": by_hour,
     }))
 }
-

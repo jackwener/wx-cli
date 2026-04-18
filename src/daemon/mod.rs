@@ -52,7 +52,8 @@ async fn async_run() -> Result<()> {
     let msg_db_keys: Vec<String> = all_keys.keys()
         .filter(|k| {
             let k = k.replace('\\', "/");
-            k.contains("message/message_") && k.ends_with(".db")
+            (k.contains("message/message_") || k.contains("message/biz_message_"))
+                && k.ends_with(".db")
                 && !k.contains("_fts") && !k.contains("_resource")
         })
         .cloned()
