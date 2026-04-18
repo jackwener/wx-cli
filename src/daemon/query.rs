@@ -1646,6 +1646,20 @@ fn sns_location_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r#"<location[^>]*poiName="([^"]*)""#).unwrap())
 }
 
+// 朋友圈扫描的硬上限：单次查询最多解析这么多行 SnsTimeLine，
+// 防止用户传超大 limit 或者底层数据异常时把 daemon 卡住。
+// 当前账号 ~10k+ 帖子，5w 上限留足缓冲。
+const SNS_MAX_LIMIT: usize = 10_000;
+const SNS_MAX_SCAN: usize = 50_000;
+
+/// 转义 SQL LIKE 模式中的元字符。配合 `ESCAPE '\\'` 使用。
+/// 反斜杠必须最先转义，否则后续替换出的 `\%` / `\_` 会被再次吞掉。
+fn escape_like_pattern(s: &str) -> String {
+    s.replace('\\', r"\\")
+        .replace('%', r"\%")
+        .replace('_', r"\_")
+}
+
 /// SnsTimeLine 行解析产物。不含 display name（依赖 Names，需要出 spawn_blocking 再补）。
 struct ParsedPost {
     tid: i64,
@@ -1707,6 +1721,7 @@ pub async fn q_sns_feed(
     let path = db.get("sns/sns.db").await?
         .context("无法解密 sns.db")?;
 
+    let limit = limit.min(SNS_MAX_LIMIT);
     let user_uname = match user {
         Some(q) => Some(
             resolve_username(q, names)
@@ -1715,39 +1730,35 @@ pub async fn q_sns_feed(
         None => None,
     };
 
-    // XML parse 和时间过滤都放 spawn_blocking 里跑：
-    // createTime 不是列，只能扫 XML；11k+ 行 × 若干 regex 不能在 tokio executor 上做。
+    // user 过滤不在 SQL 层做：SnsTimeLine.user_name 列对部分（转发）帖子是空，
+    // 真正作者只在 XML <username> 里。SQL 层 `user_name = ?` 会把这部分提前漏掉，
+    // 让 parse_post_xml 的 fallback 失效。所以扫全表 → parse → 用 ParsedPost.author_username 过滤。
+    // (createTime 也不是列，本来就要扫全表 parse XML 才能正确按时间排序。)
     let path2 = path.clone();
     let parsed: Vec<ParsedPost> = tokio::task::spawn_blocking(move || {
         let conn = Connection::open(&path2)?;
-        let mut clauses: Vec<&str> = Vec::new();
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        if let Some(u) = user_uname.as_ref() {
-            clauses.push("user_name = ?");
-            params.push(Box::new(u.clone()));
-        }
-        let where_clause = if clauses.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", clauses.join(" AND "))
-        };
-        let sql = format!(
-            "SELECT tid, user_name, content FROM SnsTimeLine {} ORDER BY tid DESC",
-            where_clause
-        );
-        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_ref.as_slice(), |row| Ok((
+        let sql = "SELECT tid, user_name, content FROM SnsTimeLine ORDER BY tid DESC";
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1).unwrap_or_default(),
             row.get::<_, String>(2).unwrap_or_default(),
         )))?;
 
+        let mut scanned = 0usize;
         let mut out: Vec<ParsedPost> = Vec::new();
         for row in rows {
+            scanned += 1;
+            if scanned > SNS_MAX_SCAN {
+                eprintln!(
+                    "[sns_feed] scan 超过硬上限 {}，结果可能不完整。建议加 --user / --since 缩小范围。",
+                    SNS_MAX_SCAN
+                );
+                break;
+            }
             let (tid, uname, content) = row?;
             let p = parse_post_xml(tid, &uname, &content);
+            if let Some(u) = user_uname.as_ref() { if &p.author_username != u { continue; } }
             if let Some(s) = since { if p.create_time < s { continue; } }
             if let Some(u) = until { if p.create_time > u { continue; } }
             out.push(p);
@@ -1780,6 +1791,7 @@ pub async fn q_sns_search(
     let path = db.get("sns/sns.db").await?
         .context("无法解密 sns.db")?;
 
+    let limit = limit.min(SNS_MAX_LIMIT);
     let user_uname = match user {
         Some(q) => Some(
             resolve_username(q, names)
@@ -1788,48 +1800,42 @@ pub async fn q_sns_search(
         None => None,
     };
 
-    // SQL LIKE 先在 content 上粗筛，Rust 侧再用 extract_xml_text 精确校验
-    // keyword 落在 contentDesc 里（否则可能命中 XML 里的 URL / attachment 字段）。
-    // 反斜杠自己要先转义，否则 ESCAPE '\\' 会吃掉后面的字符。
-    let like_pattern = format!(
-        "%{}%",
-        keyword
-            .replace('\\', r"\\")
-            .replace('%', r"\%")
-            .replace('_', r"\_")
-    );
+    // SQL LIKE 在 content 上粗筛 keyword（这步省掉绝大多数行的 XML parse 开销）。
+    // user 不在 SQL 层过滤，原因同 q_sns_feed：SnsTimeLine.user_name 列对部分（转发）
+    // 帖子为空，真实作者只在 XML <username> 里。
+    let like_pattern = format!("%{}%", escape_like_pattern(keyword));
     let keyword_owned = keyword.to_string();
 
     let path2 = path.clone();
     let parsed: Vec<ParsedPost> = tokio::task::spawn_blocking(move || {
         let conn = Connection::open(&path2)?;
-        let mut clauses: Vec<&str> = vec!["content LIKE ? ESCAPE '\\'"];
-        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(like_pattern)];
-        if let Some(u) = user_uname.as_ref() {
-            clauses.push("user_name = ?");
-            params.push(Box::new(u.clone()));
-        }
-        let sql = format!(
-            "SELECT tid, user_name, content FROM SnsTimeLine WHERE {} ORDER BY tid DESC",
-            clauses.join(" AND ")
-        );
-        let params_ref: Vec<&dyn rusqlite::types::ToSql> =
-            params.iter().map(|p| p.as_ref()).collect();
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_ref.as_slice(), |row| Ok((
+        let sql = "SELECT tid, user_name, content FROM SnsTimeLine \
+                   WHERE content LIKE ? ESCAPE '\\' ORDER BY tid DESC";
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([&like_pattern], |row| Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1).unwrap_or_default(),
             row.get::<_, String>(2).unwrap_or_default(),
         )))?;
 
         let needle = keyword_owned.to_lowercase();
+        let mut scanned = 0usize;
         let mut out: Vec<ParsedPost> = Vec::new();
         for row in rows {
+            scanned += 1;
+            if scanned > SNS_MAX_SCAN {
+                eprintln!(
+                    "[sns_search] scan 超过硬上限 {}，结果可能不完整。建议缩小 keyword 或加 --user / --since。",
+                    SNS_MAX_SCAN
+                );
+                break;
+            }
             let (tid, uname, content) = row?;
             let desc = extract_xml_text(&content, "contentDesc").unwrap_or_default();
             if !desc.to_lowercase().contains(&needle) { continue; }
 
             let p = parse_post_xml(tid, &uname, &content);
+            if let Some(u) = user_uname.as_ref() { if &p.author_username != u { continue; } }
             if let Some(s) = since { if p.create_time < s { continue; } }
             if let Some(u) = until { if p.create_time > u { continue; } }
             out.push(p);
@@ -1842,4 +1848,85 @@ pub async fn q_sns_search(
     let posts: Vec<Value> = parsed.into_iter().map(|p| post_to_value(p, names)).collect();
     let total = posts.len();
     Ok(json!({ "keyword": keyword, "posts": posts, "total": total }))
+}
+
+#[cfg(test)]
+mod sns_tests {
+    use super::*;
+
+    fn make_post_xml(create_time: &str, desc: &str, username_tag: Option<&str>, media: usize, location: Option<&str>) -> String {
+        let username = username_tag.map(|u| format!("<username>{}</username>", u)).unwrap_or_default();
+        let media_tags = "<media>...</media>".repeat(media);
+        let media_list = if media > 0 { format!("<mediaList>{}</mediaList>", media_tags) } else { String::new() };
+        let loc = location
+            .map(|p| format!(r#"<location poiName="{}" longitude="0" latitude="0" />"#, p))
+            .unwrap_or_default();
+        format!(
+            "<TimelineObject>{}<createTime>{}</createTime><contentDesc>{}</contentDesc>{}{}</TimelineObject>",
+            username, create_time, desc, media_list, loc
+        )
+    }
+
+    #[test]
+    fn parse_uses_user_name_column_when_present() {
+        let xml = make_post_xml("1700000000", "hello", Some("wxid_xml"), 0, None);
+        let p = parse_post_xml(1, "wxid_column", &xml);
+        assert_eq!(p.author_username, "wxid_column");
+        assert_eq!(p.create_time, 1700000000);
+        assert_eq!(p.content, "hello");
+        assert_eq!(p.media_count, 0);
+        assert_eq!(p.location, "");
+    }
+
+    #[test]
+    fn parse_falls_back_to_xml_username_when_column_empty() {
+        let xml = make_post_xml("1700000001", "world", Some("wxid_xml_only"), 0, None);
+        let p = parse_post_xml(2, "", &xml);
+        assert_eq!(p.author_username, "wxid_xml_only");
+    }
+
+    #[test]
+    fn parse_handles_missing_create_time() {
+        let xml = "<TimelineObject><contentDesc>x</contentDesc></TimelineObject>";
+        let p = parse_post_xml(3, "wxid", xml);
+        assert_eq!(p.create_time, 0);
+        assert_eq!(p.content, "x");
+    }
+
+    #[test]
+    fn parse_counts_media_and_extracts_location() {
+        let xml = make_post_xml("1700000002", "post", None, 3, Some("Wuxi"));
+        let p = parse_post_xml(4, "wxid", &xml);
+        assert_eq!(p.media_count, 3);
+        assert_eq!(p.location, "Wuxi");
+    }
+
+    #[test]
+    fn parse_when_both_column_and_xml_username_empty_returns_empty_author() {
+        let xml = "<TimelineObject><createTime>1700000003</createTime><contentDesc>orphan</contentDesc></TimelineObject>";
+        let p = parse_post_xml(5, "", xml);
+        assert_eq!(p.author_username, "");
+    }
+
+    #[test]
+    fn escape_like_pattern_escapes_backslash_first() {
+        // 反斜杠必须在 % / _ 之前转义；否则后面塞进去的 \% / \_ 会被再次双转义吃掉
+        assert_eq!(escape_like_pattern("a\\b"), "a\\\\b");
+        assert_eq!(escape_like_pattern("100%"), "100\\%");
+        assert_eq!(escape_like_pattern("foo_bar"), "foo\\_bar");
+    }
+
+    #[test]
+    fn escape_like_pattern_combined() {
+        // \%_ 三个元字符同时出现
+        let escaped = escape_like_pattern("a\\b%c_d");
+        assert_eq!(escaped, "a\\\\b\\%c\\_d");
+    }
+
+    #[test]
+    fn escape_like_pattern_no_special_chars_unchanged() {
+        assert_eq!(escape_like_pattern("hello world"), "hello world");
+        assert_eq!(escape_like_pattern("中文关键词"), "中文关键词");
+        assert_eq!(escape_like_pattern(""), "");
+    }
 }
