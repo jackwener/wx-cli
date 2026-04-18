@@ -148,6 +148,32 @@ wx contacts --query "李"
 wx members "AI交流群"
 ```
 
+### 朋友圈（SNS）
+
+三个命令，作用各不同：
+
+```bash
+# 1) 互动通知（点赞 / 评论，默认仅未读）
+wx sns-notifications
+wx sns-notifications --include-read --since 2026-04-01 -n 100
+
+# 2) 时间线：浏览本地缓存的朋友圈帖子
+wx sns-feed                                    # 近 20 条
+wx sns-feed --user "张三"                      # 只看某人
+wx sns-feed --since 2026-04-01 --until 2026-04-18 -n 100
+
+# 3) 全文搜索：在正文里找关键词
+wx sns-search "关键词"
+wx sns-search "婚礼" --user "李四" --since 2023-01-01 -n 50
+```
+
+**字段区分**：
+
+- `sns-notifications` 返回"通知"条目：`type`（`like`/`comment`）、`from_nickname`、`content`（评论正文，点赞为空）、`feed_preview` + `feed_author`（对应的原帖）
+- `sns-feed` / `sns-search` 返回"帖子"条目：`author`、`content`（朋友圈正文）、`media_count`（图片/视频数）、`location`、`timestamp`
+
+> 只保存你本地刷到过的朋友圈（微信 app 按需下载）。没刷到过的帖子不在本地，任何命令都拿不到。
+
 ### 收藏与统计
 
 ```bash

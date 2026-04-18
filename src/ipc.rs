@@ -78,6 +78,42 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         query: Option<String>,
     },
+    /// 朋友圈互动通知（点赞 + 评论）
+    SnsNotifications {
+        #[serde(default = "default_limit_50")]
+        limit: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+        /// 包含已读通知（默认仅未读）
+        #[serde(default)]
+        include_read: bool,
+    },
+    /// 朋友圈时间线（按时间 / 作者筛选帖子）
+    SnsFeed {
+        #[serde(default = "default_limit_20")]
+        limit: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+        /// 作者昵称 / 备注名 / 微信 username，模糊匹配
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+    },
+    /// 朋友圈全文搜索（匹配 contentDesc）
+    SnsSearch {
+        keyword: String,
+        #[serde(default = "default_limit_20")]
+        limit: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+    },
 }
 
 

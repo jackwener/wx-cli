@@ -12,6 +12,9 @@ pub mod members;
 pub mod new_messages;
 pub mod stats;
 pub mod favorites;
+pub mod sns_notifications;
+pub mod sns_feed;
+pub mod sns_search;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -181,6 +184,62 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// 朋友圈互动通知：别人对我的朋友圈点赞/评论 + 我评过的帖子下的跟帖
+    SnsNotifications {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 包含已读通知（默认仅未读）
+        #[arg(long)]
+        include_read: bool,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 朋友圈时间线：按时间/作者筛选本地缓存的朋友圈
+    SnsFeed {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 只看指定作者（昵称 / 备注名 / 微信 ID，模糊匹配）
+        #[arg(long)]
+        user: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 朋友圈全文搜索：匹配正文关键词
+    SnsSearch {
+        /// 关键词
+        keyword: String,
+        /// 结果数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 限定作者（昵称 / 备注名 / 微信 ID）
+        #[arg(long)]
+        user: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
     /// 管理 wx-daemon
     Daemon {
         #[command(subcommand)]
@@ -235,6 +294,15 @@ fn dispatch(cli: Cli) -> Result<()> {
         }
         Commands::Favorites { limit, fav_type, query, json } => {
             favorites::cmd_favorites(limit, fav_type, query, json)
+        }
+        Commands::SnsNotifications { limit, since, until, include_read, json } => {
+            sns_notifications::cmd_sns_notifications(limit, since, until, include_read, json)
+        }
+        Commands::SnsFeed { limit, since, until, user, json } => {
+            sns_feed::cmd_sns_feed(limit, since, until, user, json)
+        }
+        Commands::SnsSearch { keyword, limit, since, until, user, json } => {
+            sns_search::cmd_sns_search(keyword, limit, since, until, user, json)
         }
         Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd),
     }

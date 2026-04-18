@@ -156,6 +156,27 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 
+### 朋友圈（SNS）
+
+三个独立命令，区分"通知"和"帖子"：
+
+```bash
+wx sns-notifications                             # 点赞/评论通知（默认仅未读）
+wx sns-notifications --include-read -n 100       # 含已读
+
+wx sns-feed                                      # 近 20 条朋友圈（时间线）
+wx sns-feed --user "张三"                        # 限定作者
+wx sns-feed --since 2026-04-01 -n 100            # 按时间
+
+wx sns-search "关键词"                           # 全文搜索朋友圈正文
+wx sns-search "婚礼" --user "李四" --since 2023-01-01
+```
+
+- **sns-notifications** 返回互动通知：`type`（`like`/`comment`）、`from_nickname`、`content`（评论正文）、`feed_preview` + `feed_author`（对应原帖）
+- **sns-feed** / **sns-search** 返回朋友圈帖子：`author`、`content`（正文）、`media_count`、`location`、`timestamp`
+
+朋友圈数据只覆盖你本地刷到过的帖子（微信 app 按需下载）。
+
 ### 联系人 & 群组
 
 ```bash

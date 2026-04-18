@@ -213,5 +213,23 @@ async fn dispatch(
                 Err(e) => Response::err(e.to_string()),
             }
         }
+        SnsNotifications { limit, since, until, include_read } => {
+            match query::q_sns_notifications(db, &names_arc, limit, since, until, include_read).await {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
+        SnsFeed { limit, since, until, user } => {
+            match query::q_sns_feed(db, &names_arc, limit, since, until, user.as_deref()).await {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
+        SnsSearch { keyword, limit, since, until, user } => {
+            match query::q_sns_search(db, &names_arc, &keyword, limit, since, until, user.as_deref()).await {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
     }
 }

@@ -73,6 +73,7 @@ async fn async_run() -> Result<()> {
     names.msg_db_keys = msg_db_keys;
 
     let _ = db.get("session/session.db").await;
+    let _ = db.get("sns/sns.db").await;
     eprintln!("[daemon] 预热完成，联系人 {} 个", names.map.len());
 
     // 包一层内部 Arc：IPC 请求取 guard 后只做 Arc::clone（O(1)），
