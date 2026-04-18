@@ -115,12 +115,16 @@ wx new-messages --json          # JSON 输出，适合 agent 解析
 
 # 聊天记录（支持昵称/备注名）
 wx history "张三"
+wx history "张三" -n 2000
 wx history "AI群" --since 2026-04-01 --until 2026-04-15 -n 100
 
 # 全库搜索
 wx search "关键词"
+wx search "关键词" -n 500
 wx search "会议" --in "工作群" --since 2026-01-01
 ```
+
+`history` / `search` / `export` 都支持 `-n` / `--limit` 指定返回条数。默认值只是为了避免一次输出过多，不是硬上限。
 
 `sessions` / `unread` / `history` / `new-messages` / `stats` 的输出都带 `chat_type` 字段，agent 可据此分流：
 
@@ -166,6 +170,7 @@ wx stats "AI群" --since 2026-01-01
 ```bash
 # 导出为 Markdown（默认）
 wx export "张三" --format markdown -o chat.md
+wx export "张三" -n 2000 --format markdown -o chat.md
 
 # 导出为 JSON
 wx export "AI群" --since 2026-01-01 --format json -o chat.json
@@ -216,3 +221,5 @@ CHAT 参数支持昵称、备注名、微信 ID，模糊匹配。不确定准确
 **daemon 无响应**：`wx daemon stop` 后重新调用任意命令自动重启。
 
 **找不到聊天**：用 `wx contacts --query` 确认昵称/备注名，或用微信 ID 直接查询。
+
+**为什么只能获取 500 条消息？**：这是默认输出条数，不是硬限制。显式传 `-n` 即可，例如 `wx history "张三" -n 2000` 或 `wx export "张三" -n 2000 -o chat.md`。

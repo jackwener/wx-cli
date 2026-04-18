@@ -145,10 +145,14 @@ wx unread                                        # 有未读消息的会话
 wx unread --filter private,group                 # 只看真人未读（过滤公众号/折叠入口）
 wx new-messages                                  # 上次检查后的新消息（增量）
 wx history "张三"                                # 最近 50 条记录
+wx history "张三" -n 2000                        # 拉更多历史消息
 wx history "AI群" --since 2026-04-01 --until 2026-04-15
 wx search "关键词"                               # 全库搜索
+wx search "关键词" -n 500                        # 放宽搜索结果条数
 wx search "会议" --in "工作群" --since 2026-01-01
 ```
+
+`history` / `search` / `export` 都支持 `-n` / `--limit` 指定条数。默认值只是为了避免一次性输出过多消息，不是硬上限。
 
 会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 
@@ -174,6 +178,7 @@ wx stats "AI群" --since 2026-01-01   # 指定时间范围
 
 ```bash
 wx export "张三" --format markdown -o chat.md
+wx export "张三" -n 2000 --format markdown -o chat.md
 wx export "AI群" --since 2026-01-01 --format json
 ```
 
