@@ -806,6 +806,21 @@ fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
     Some(xml[content_start..content_start + end].trim().to_string())
 }
 
+fn extract_xml_attr(xml: &str, tag: &str, attr: &str) -> Option<String> {
+    let open = format!("<{}", tag);
+    let start = xml.find(&open)?;
+    let tag_end = start + xml[start..].find('>')?;
+    let attr_pat = format!(r#"{}=""#, attr);
+    let attr_start = start + xml[start..tag_end].find(&attr_pat)? + attr_pat.len();
+    let attr_end = attr_start + xml[attr_start..tag_end].find('"')?;
+    let value = xml[attr_start..attr_end].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
 fn unescape_html(s: &str) -> String {
     s.replace("&lt;", "<")
      .replace("&gt;", ">")
@@ -1762,6 +1777,34 @@ struct ParsedPost {
     location: String,
 }
 
+fn parse_post_xml_fallback(tid: i64, user_name_column: &str, content: &str) -> ParsedPost {
+    let create_time = extract_xml_text(content, "createTime")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let text = extract_xml_text(content, "contentDesc")
+        .map(|s| unescape_html(&s))
+        .unwrap_or_default();
+    let author_username = if user_name_column.is_empty() {
+        extract_xml_text(content, "username")
+            .map(|s| unescape_html(&s))
+            .unwrap_or_default()
+    } else {
+        user_name_column.to_string()
+    };
+    let location = extract_xml_attr(content, "location", "poiName")
+        .map(|s| unescape_html(&s))
+        .unwrap_or_default();
+
+    ParsedPost {
+        tid,
+        create_time,
+        author_username,
+        content: text,
+        media: Vec::new(),
+        location,
+    }
+}
+
 /// 纯 XML 解析，无 Names 依赖，可以在 spawn_blocking 里跑。
 /// user_name_column 为空时从 TimelineObject/<username> 兜底（转发帖）。
 ///
@@ -1769,19 +1812,15 @@ struct ParsedPost {
 /// 取代旧版 regex + DOM 双解析。XML entity 解码（`&lt;` / `&amp;` 等）由 roxmltree 自动处理，
 /// 旧版 `extract_xml_text` 是字符串扫描不解码 —— 因此 `content` / `location` / `username` 字段
 /// 现在会输出解码后的文本，对下游是更正确的语义。
+/// 如果 XML 已损坏到无法 DOM parse，或缺少 `TimelineObject`，则退回轻量 string
+/// fallback，尽量保住 createTime / contentDesc / username / location，避免一条帖子
+/// 因为局部坏 XML 被整体打成零值，影响排序 / 搜索 / 作者过滤语义。
 fn parse_post_xml(tid: i64, user_name_column: &str, content: &str) -> ParsedPost {
-    let empty = || ParsedPost {
-        tid,
-        create_time: 0,
-        author_username: user_name_column.to_string(),
-        content: String::new(),
-        media: Vec::new(),
-        location: String::new(),
+    let Ok(doc) = Document::parse(content) else {
+        return parse_post_xml_fallback(tid, user_name_column, content);
     };
-
-    let Ok(doc) = Document::parse(content) else { return empty(); };
     let Some(timeline) = doc.descendants().find(|n| n.has_tag_name("TimelineObject")) else {
-        return empty();
+        return parse_post_xml_fallback(tid, user_name_column, content);
     };
 
     let create_time = xml_text(xml_child(timeline, "createTime"))
@@ -2035,14 +2074,34 @@ mod sns_tests {
     }
 
     #[test]
-    fn parse_returns_defaults_for_malformed_xml() {
-        // DOM 解析失败时返回默认值（不 panic、不漏字段），author 走 column fallback。
-        let p = parse_post_xml(7, "wxid_fallback", "<TimelineObject><not valid xml");
-        assert_eq!(p.create_time, 0);
-        assert_eq!(p.content, "");
+    fn parse_malformed_xml_falls_back_to_string_fields_when_column_present() {
+        let xml = "<TimelineObject><createTime>1700000007</createTime><contentDesc>A &amp; B</contentDesc><location poiName=\"Wuxi &amp; Lake\" /><not valid xml";
+        let p = parse_post_xml(7, "wxid_fallback", xml);
+        assert_eq!(p.create_time, 1700000007);
+        assert_eq!(p.content, "A & B");
         assert_eq!(p.author_username, "wxid_fallback");
         assert!(p.media.is_empty());
-        assert_eq!(p.location, "");
+        assert_eq!(p.location, "Wuxi & Lake");
+    }
+
+    #[test]
+    fn parse_malformed_xml_can_still_use_xml_username_when_column_empty() {
+        let xml = "<TimelineObject><createTime>1700000008</createTime><contentDesc>broken</contentDesc><username>wxid_xml_only</username><not valid xml";
+        let p = parse_post_xml(8, "", xml);
+        assert_eq!(p.create_time, 1700000008);
+        assert_eq!(p.content, "broken");
+        assert_eq!(p.author_username, "wxid_xml_only");
+        assert!(p.media.is_empty());
+    }
+
+    #[test]
+    fn parse_without_timeline_object_falls_back_to_string_fields() {
+        let xml = "<SnsDataItem><createTime>1700000009</createTime><contentDesc>still here</contentDesc><username>wxid_outer</username></SnsDataItem>";
+        let p = parse_post_xml(9, "", xml);
+        assert_eq!(p.create_time, 1700000009);
+        assert_eq!(p.content, "still here");
+        assert_eq!(p.author_username, "wxid_outer");
+        assert!(p.media.is_empty());
     }
 
     #[test]
