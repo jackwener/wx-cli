@@ -1770,28 +1770,18 @@ struct ParsedPost {
 /// 旧版 `extract_xml_text` 是字符串扫描不解码 —— 因此 `content` / `location` / `username` 字段
 /// 现在会输出解码后的文本，对下游是更正确的语义。
 fn parse_post_xml(tid: i64, user_name_column: &str, content: &str) -> ParsedPost {
-    let fallback_author = || user_name_column.to_string();
-
-    let Ok(doc) = Document::parse(content) else {
-        return ParsedPost {
-            tid,
-            create_time: 0,
-            author_username: fallback_author(),
-            content: String::new(),
-            media: Vec::new(),
-            location: String::new(),
-        };
+    let empty = || ParsedPost {
+        tid,
+        create_time: 0,
+        author_username: user_name_column.to_string(),
+        content: String::new(),
+        media: Vec::new(),
+        location: String::new(),
     };
 
+    let Ok(doc) = Document::parse(content) else { return empty(); };
     let Some(timeline) = doc.descendants().find(|n| n.has_tag_name("TimelineObject")) else {
-        return ParsedPost {
-            tid,
-            create_time: 0,
-            author_username: fallback_author(),
-            content: String::new(),
-            media: Vec::new(),
-            location: String::new(),
-        };
+        return empty();
     };
 
     let create_time = xml_text(xml_child(timeline, "createTime"))
