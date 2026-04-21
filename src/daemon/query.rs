@@ -549,15 +549,20 @@ fn query_messages(
         let content = decompress_message(&content_bytes, ct);
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map, group_nicknames);
         let text = fmt_content(local_id, local_type, &content, is_group);
+        let url = appmsg_url_for_message(local_type, &content);
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
             "local_id": local_id,
-        }));
+        });
+        if let Some(u) = url {
+            msg["url"] = serde_json::Value::String(u);
+        }
+        result.push(msg);
     }
     Ok(result)
 }
@@ -636,15 +641,20 @@ fn search_in_table(
         if search_decoded_content && !matches_search_text(&content, &text, keyword, &keyword_lower) {
             continue;
         }
+        let url = appmsg_url_for_message(local_type, &content);
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "chat": "",
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
-        }));
+        });
+        if let Some(u) = url {
+            msg["url"] = serde_json::Value::String(u);
+        }
+        result.push(msg);
         if search_decoded_content && result.len() >= limit {
             break;
         }
@@ -1271,6 +1281,25 @@ fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
     let content_start = start + open.len();
     let end = xml[content_start..].find(&close)?;
     Some(xml[content_start..content_start + end].trim().to_string())
+}
+
+/// 从 appmsg XML 中提取链接 URL（优先取 <url>，fallback 到 <url1>）
+fn extract_appmsg_url(text: &str) -> Option<String> {
+    // 群消息前缀 "wxid_xxx:\n" 需先剥离
+    let xml = if text.contains(":\n") {
+        text.splitn(2, ":\n").nth(1).unwrap_or(text)
+    } else {
+        text
+    };
+    if !xml.contains("<appmsg") {
+        return None;
+    }
+    let url = extract_xml_text(xml, "url")
+        .or_else(|| extract_xml_text(xml, "url1"))?;
+    if url.is_empty() || !url.starts_with("http") {
+        return None;
+    }
+    Some(url)
 }
 
 fn extract_xml_attr(xml: &str, tag: &str, attr: &str) -> Option<String> {
