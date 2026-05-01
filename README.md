@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#安装)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 
-会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 收藏 · 统计 · 导出
+会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 群昵称 · 收藏 · 统计 · 导出
 
 </div>
 
@@ -156,6 +156,8 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 
+群聊里的 `last_sender`、`sender` 和 `stats` 的 `top_senders` 会优先使用群昵称（群名片）。如果本地数据库里没有对应群昵称，则回退到联系人备注、微信昵称或 username。
+
 ### 朋友圈（SNS）
 
 三个独立命令，区分"通知"和"帖子"：
@@ -184,6 +186,14 @@ wx contacts                  # 联系人列表
 wx contacts --query "李"     # 按名字搜索
 wx members "AI交流群"        # 群成员列表
 ```
+
+`wx members --json` 返回的成员字段包括：
+
+- `username`：微信内部 username
+- `display`：用于展示的名称，优先使用群昵称
+- `contact_display`：联系人备注或微信昵称
+- `group_nickname`：群昵称；本地没有记录时为空字符串
+- `is_owner`：是否群主
 
 ### 收藏 & 统计
 
