@@ -4,8 +4,8 @@ use regex::Regex;
 use roxmltree::{Document, Node};
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 
 use super::cache::DbCache;
 
@@ -141,6 +141,7 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
     }).await??;
 
     let mut results = Vec::new();
+    let mut group_nickname_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
     for (username, unread, summary_bytes, ts, msg_type, sender, sender_name) in rows {
         let display = names.display(&username);
         let chat_type = chat_type_of(&username, names);
@@ -151,9 +152,13 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
         let summary = strip_group_prefix(&summary);
 
         let sender_display = if is_group && !sender.is_empty() {
-            names.map.get(&sender).cloned().unwrap_or_else(|| {
-                if !sender_name.is_empty() { sender_name.clone() } else { sender.clone() }
-            })
+            if !group_nickname_cache.contains_key(&username) {
+                let nicknames = load_group_nicknames(db, &username).await.unwrap_or_default();
+                group_nickname_cache.insert(username.clone(), nicknames);
+            }
+            let empty = HashMap::new();
+            let group_nicknames = group_nickname_cache.get(&username).unwrap_or(&empty);
+            sender_display(&sender, &sender_name, &names.map, group_nicknames)
         } else {
             String::new()
         };
@@ -197,12 +202,18 @@ pub async fn q_history(
     }
 
     let mut all_msgs: Vec<Value> = Vec::new();
+    let group_nicknames = if is_group {
+        load_group_nicknames(db, &username).await.unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
     for (db_path, table_name) in &tables {
         let path = db_path.clone();
         let tname = table_name.clone();
         let uname = username.clone();
         let is_group2 = is_group;
         let names_map = names.map.clone();
+        let group_nicknames2 = group_nicknames.clone();
         let since2 = since;
         let until2 = until;
         let limit2 = limit;
@@ -211,7 +222,7 @@ pub async fn q_history(
         let msgs: Vec<Value> = tokio::task::spawn_blocking(move || {
             // per-DB 软上限：offset + limit 已足够全局分页，避免大群全量加载
             let per_db_cap = offset2 + limit2;
-            query_messages(&path, &tname, &uname, is_group2, &names_map, since2, until2, msg_type, per_db_cap, 0)
+            query_messages(&path, &tname, &uname, is_group2, &names_map, &group_nicknames2, since2, until2, msg_type, per_db_cap, 0)
         }).await??;
 
         all_msgs.extend(msgs);
@@ -311,6 +322,19 @@ pub async fn q_search(
         by_path.entry(p).or_default().push((t, d, u));
     }
 
+    let mut group_usernames = HashSet::new();
+    for table_list in by_path.values() {
+        for (_, _, uname) in table_list {
+            if uname.contains("@chatroom") {
+                group_usernames.insert(uname.clone());
+            }
+        }
+    }
+    let group_nicknames_by_chat = load_group_nickname_maps(db, group_usernames)
+        .await
+        .unwrap_or_default();
+    let group_nicknames_by_chat = Arc::new(group_nicknames_by_chat);
+
     let mut results: Vec<Value> = Vec::new();
     let kw = keyword.to_string();
     for (db_path, table_list) in by_path {
@@ -320,13 +344,18 @@ pub async fn q_search(
         let limit2 = limit * 3;
 
         let names_map2 = names.map.clone();
+        let group_nicknames_by_chat2 = Arc::clone(&group_nicknames_by_chat);
         let found: Vec<Value> = match tokio::task::spawn_blocking(move || {
             let conn = Connection::open(&db_path)?;
             let mut all = Vec::new();
+            let empty_group_nicknames = HashMap::new();
             for (tname, display, uname) in &table_list {
                 let is_group = uname.contains("@chatroom");
+                let group_nicknames = group_nicknames_by_chat2
+                    .get(uname)
+                    .unwrap_or(&empty_group_nicknames);
                 match search_in_table(&conn, tname, &uname, is_group,
-                    &names_map2, &kw2, since2, until2, msg_type, limit2)
+                    &names_map2, group_nicknames, &kw2, since2, until2, msg_type, limit2)
                 {
                     Ok(rows) => {
                         for mut row in rows {
@@ -461,6 +490,7 @@ fn query_messages(
     chat_username: &str,
     is_group: bool,
     names_map: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
     since: Option<i64>,
     until: Option<i64>,
     msg_type: Option<i64>,
@@ -518,7 +548,7 @@ fn query_messages(
     let mut result = Vec::new();
     for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
         let content = decompress_message(&content_bytes, ct);
-        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
+        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map, group_nicknames);
         let text = fmt_content(local_id, local_type, &content, is_group);
 
         result.push(json!({
@@ -539,6 +569,7 @@ fn search_in_table(
     chat_username: &str,
     is_group: bool,
     names_map: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
     keyword: &str,
     since: Option<i64>,
     until: Option<i64>,
@@ -589,7 +620,7 @@ fn search_in_table(
     let mut result = Vec::new();
     for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
         let content = decompress_message(&content_bytes, ct);
-        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
+        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map, group_nicknames);
         let text = fmt_content(local_id, local_type, &content, is_group);
 
         result.push(json!({
@@ -618,6 +649,344 @@ fn load_id2u(conn: &Connection) -> HashMap<i64, String> {
     map
 }
 
+async fn load_group_nicknames(
+    db: &DbCache,
+    chat_username: &str,
+) -> Result<HashMap<String, String>> {
+    if !chat_username.contains("@chatroom") {
+        return Ok(HashMap::new());
+    }
+    let Some(contact_p) = db.get("contact/contact.db").await? else {
+        return Ok(HashMap::new());
+    };
+    let chat = chat_username.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&contact_p)?;
+        Ok::<_, anyhow::Error>(load_group_nickname_map_from_conn(&conn, &chat, None))
+    }).await?
+}
+
+async fn load_group_nickname_maps(
+    db: &DbCache,
+    chat_usernames: HashSet<String>,
+) -> Result<HashMap<String, HashMap<String, String>>> {
+    if chat_usernames.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let Some(contact_p) = db.get("contact/contact.db").await? else {
+        return Ok(HashMap::new());
+    };
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&contact_p)?;
+        let mut out = HashMap::new();
+        for chat in chat_usernames {
+            let nicknames = load_group_nickname_map_from_conn(&conn, &chat, None);
+            if !nicknames.is_empty() {
+                out.insert(chat, nicknames);
+            }
+        }
+        Ok::<_, anyhow::Error>(out)
+    }).await?
+}
+
+fn load_group_nickname_map_from_conn(
+    conn: &Connection,
+    chat_username: &str,
+    targets: Option<&HashSet<String>>,
+) -> HashMap<String, String> {
+    if !chat_username.contains("@chatroom") {
+        return HashMap::new();
+    }
+    let ext = load_group_ext_buffer(conn, chat_username);
+
+    let owned_targets = if targets.is_none() {
+        load_group_member_username_set(conn, chat_username)
+    } else {
+        None
+    };
+    let targets = targets.or(owned_targets.as_ref());
+
+    ext.as_deref()
+        .map(|buf| parse_group_nickname_map(buf, targets))
+        .unwrap_or_default()
+}
+
+fn load_group_ext_buffer(
+    conn: &Connection,
+    chat_username: &str,
+) -> Option<Vec<u8>> {
+    [
+        "SELECT ext_buffer FROM chat_room WHERE username = ? LIMIT 1",
+        "SELECT ext_buffer FROM chat_room WHERE chat_room_name = ? LIMIT 1",
+        "SELECT ext_buffer FROM chat_room WHERE name = ? LIMIT 1",
+    ].iter().find_map(|sql| {
+        conn.query_row(sql, [chat_username], |row| row.get::<_, Option<Vec<u8>>>(0))
+            .ok()
+            .flatten()
+    })
+}
+
+fn load_group_member_username_set(
+    conn: &Connection,
+    chat_username: &str,
+) -> Option<HashSet<String>> {
+    let room_id: i64 = [
+        "SELECT id FROM chat_room WHERE username = ?",
+        "SELECT id FROM chat_room WHERE chat_room_name = ?",
+        "SELECT id FROM chat_room WHERE name = ?",
+    ].iter().find_map(|sql| {
+        conn.query_row(sql, [chat_username], |row| row.get::<_, i64>(0)).ok()
+    }).unwrap_or(0);
+
+    if room_id == 0 {
+        return None;
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT c.username
+         FROM chatroom_member cm
+         LEFT JOIN contact c ON c.id = cm.member_id
+         WHERE cm.room_id = ?"
+    ).ok()?;
+    let usernames: HashSet<String> = stmt.query_map([room_id], |row| {
+        row.get::<_, String>(0)
+    }).ok()?
+    .filter_map(|r| r.ok())
+    .filter(|uid| !uid.is_empty())
+    .collect();
+
+    if usernames.is_empty() { None } else { Some(usernames) }
+}
+
+fn decode_proto_varint(raw: &[u8], offset: usize) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    let mut pos = offset;
+    while pos < raw.len() {
+        let byte = raw[pos];
+        pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some((value, pos));
+        }
+        shift += 7;
+        if shift > 63 {
+            return None;
+        }
+    }
+    None
+}
+
+fn proto_len_fields<'a>(raw: &'a [u8]) -> Vec<(u64, &'a [u8])> {
+    let mut fields = Vec::new();
+    let mut idx = 0usize;
+    while idx < raw.len() {
+        let Some((tag, next)) = decode_proto_varint(raw, idx) else { break; };
+        if next <= idx { break; }
+        idx = next;
+        let field_no = tag >> 3;
+        let wire_type = tag & 0x07;
+        match wire_type {
+            0 => {
+                let Some((_, next)) = decode_proto_varint(raw, idx) else { break; };
+                if next <= idx { break; }
+                idx = next;
+            }
+            1 => {
+                let Some(next) = idx.checked_add(8) else { break; };
+                if next > raw.len() { break; }
+                idx = next;
+            }
+            2 => {
+                let Some((size, next)) = decode_proto_varint(raw, idx) else { break; };
+                if next <= idx { break; }
+                idx = next;
+                let Ok(size) = usize::try_from(size) else { break; };
+                let Some(end) = idx.checked_add(size) else { break; };
+                if end > raw.len() { break; }
+                fields.push((field_no, &raw[idx..end]));
+                idx = end;
+            }
+            5 => {
+                let Some(next) = idx.checked_add(4) else { break; };
+                if next > raw.len() { break; }
+                idx = next;
+            }
+            _ => break,
+        }
+    }
+    fields
+}
+
+fn proto_string_fields(raw: &[u8]) -> Vec<(u64, String)> {
+    proto_len_fields(raw)
+        .into_iter()
+        .filter_map(|(field_no, value)| {
+            if value.is_empty() || value.len() > 256 {
+                return None;
+            }
+            let text = std::str::from_utf8(value).ok()?.trim().to_string();
+            if text.is_empty() || text.chars().any(char::is_control) {
+                return None;
+            }
+            Some((field_no, text))
+        })
+        .collect()
+}
+
+fn is_strong_username_hint(value: &str) -> bool {
+    value.starts_with("wxid_")
+        || value.ends_with("@chatroom")
+        || value.starts_with("gh_")
+        || value.contains('@')
+}
+
+fn looks_like_username(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    if is_strong_username_hint(value) {
+        return true;
+    }
+    if value.len() < 6 || value.len() > 32 || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else { return false; };
+    first.is_ascii_alphabetic()
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn pick_member_username(
+    strings: &[(u64, String)],
+    targets: Option<&HashSet<String>>,
+) -> Option<String> {
+    if let Some(targets) = targets {
+        return strings
+            .iter()
+            .find(|(_, value)| targets.contains(value))
+            .map(|(_, value)| value.clone());
+    }
+
+    for field_no in [1u64, 4u64] {
+        if let Some((_, value)) = strings
+            .iter()
+            .find(|(f, value)| *f == field_no && looks_like_username(value))
+        {
+            return Some(value.clone());
+        }
+    }
+
+    strings
+        .iter()
+        .find(|(_, value)| is_strong_username_hint(value))
+        .or_else(|| strings.iter().find(|(_, value)| looks_like_username(value)))
+        .map(|(_, value)| value.clone())
+}
+
+fn pick_group_nickname(strings: &[(u64, String)], username: &str) -> Option<String> {
+    let mut best_score = i64::MIN;
+    let mut best = String::new();
+
+    for (idx, (field_no, value)) in strings.iter().enumerate() {
+        let value = value.trim();
+        if value.is_empty()
+            || value == username
+            || is_strong_username_hint(value)
+            || value.contains('\n')
+            || value.contains('\r')
+            || value.len() > 64
+        {
+            continue;
+        }
+
+        let mut score = 0i64;
+        if *field_no == 2 {
+            score += 100;
+        }
+        if !looks_like_username(value) {
+            score += 20;
+        }
+        score += (32usize.saturating_sub(value.len())) as i64;
+        score = score * 1000 - idx as i64;
+
+        if score > best_score {
+            best_score = score;
+            best = value.to_string();
+        }
+    }
+
+    if best.is_empty() { None } else { Some(best) }
+}
+
+fn parse_group_nickname_map(
+    ext_buffer: &[u8],
+    targets: Option<&HashSet<String>>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if ext_buffer.is_empty() {
+        return out;
+    }
+
+    for (_, chunk) in proto_len_fields(ext_buffer) {
+        let strings = proto_string_fields(chunk);
+        if strings.is_empty() {
+            continue;
+        }
+        let Some(username) = pick_member_username(&strings, targets) else {
+            continue;
+        };
+        if out.contains_key(&username) {
+            continue;
+        }
+        if let Some(nickname) = pick_group_nickname(&strings, &username) {
+            out.insert(username, nickname);
+        }
+    }
+
+    out
+}
+
+fn contact_display(
+    uid: &str,
+    nick: &str,
+    remark: &str,
+    names_map: &HashMap<String, String>,
+) -> String {
+    if !remark.is_empty() {
+        remark.to_string()
+    } else if !nick.is_empty() {
+        nick.to_string()
+    } else {
+        names_map.get(uid).cloned().unwrap_or_else(|| uid.to_string())
+    }
+}
+
+fn sender_display(
+    username: &str,
+    fallback_sender_name: &str,
+    names: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
+) -> String {
+    if username.is_empty() {
+        return String::new();
+    }
+    group_nicknames
+        .get(username)
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .or_else(|| names.get(username).cloned())
+        .or_else(|| {
+            if fallback_sender_name.is_empty() {
+                None
+            } else {
+                Some(fallback_sender_name.to_string())
+            }
+        })
+        .unwrap_or_else(|| username.to_string())
+}
+
 fn sender_label(
     real_sender_id: i64,
     content: &str,
@@ -625,15 +994,16 @@ fn sender_label(
     chat_username: &str,
     id2u: &HashMap<i64, String>,
     names: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
 ) -> String {
     let sender_uname = id2u.get(&real_sender_id).cloned().unwrap_or_default();
     if is_group {
         if !sender_uname.is_empty() && sender_uname != chat_username {
-            return names.get(&sender_uname).cloned().unwrap_or(sender_uname);
+            return sender_display(&sender_uname, "", names, group_nicknames);
         }
         if content.contains(":\n") {
             let raw = content.splitn(2, ":\n").next().unwrap_or("");
-            return names.get(raw).cloned().unwrap_or_else(|| raw.to_string());
+            return sender_display(raw, "", names, group_nicknames);
         }
         return String::new();
     }
@@ -904,6 +1274,7 @@ pub async fn q_unread(
     }).await??;
 
     let mut results = Vec::new();
+    let mut group_nickname_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
     for (username, unread, summary_bytes, ts, msg_type, sender, sender_name) in rows {
         let chat_type = chat_type_of(&username, names);
         if let Some(ref set) = filter_set {
@@ -916,9 +1287,13 @@ pub async fn q_unread(
         let summary = decompress_or_str(&summary_bytes);
         let summary = strip_group_prefix(&summary);
         let sender_display = if is_group && !sender.is_empty() {
-            names.map.get(&sender).cloned().unwrap_or_else(|| {
-                if !sender_name.is_empty() { sender_name.clone() } else { sender.clone() }
-            })
+            if !group_nickname_cache.contains_key(&username) {
+                let nicknames = load_group_nicknames(db, &username).await.unwrap_or_default();
+                group_nickname_cache.insert(username.clone(), nicknames);
+            }
+            let empty = HashMap::new();
+            let group_nicknames = group_nickname_cache.get(&username).unwrap_or(&empty);
+            sender_display(&sender, &sender_name, &names.map, group_nicknames)
         } else {
             String::new()
         };
@@ -955,7 +1330,6 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
     // 优先路径：contact.db → chatroom_member + chat_room（完整成员列表）
     if let Some(contact_p) = db.get("contact/contact.db").await? {
         let uname2 = username.clone();
-        let display2 = display.clone();
         let names_map2 = names_map.clone();
 
         let members_opt: Option<Vec<Value>> = tokio::task::spawn_blocking(move || {
@@ -1008,12 +1382,31 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
                 return Ok(None);
             }
 
+            let target_usernames: HashSet<String> = raw.iter()
+                .map(|(uid, _, _)| uid.clone())
+                .collect();
+            let group_nicknames = load_group_nickname_map_from_conn(
+                &conn,
+                &uname2,
+                Some(&target_usernames),
+            );
+
             let mut members: Vec<Value> = raw.iter().map(|(uid, nick, remark)| {
-                let disp = if !remark.is_empty() { remark.clone() }
-                    else if !nick.is_empty() { nick.clone() }
-                    else { names_map2.get(uid).cloned().unwrap_or_else(|| uid.clone()) };
+                let contact_display = contact_display(uid, nick, remark, &names_map2);
+                let group_nickname = group_nicknames.get(uid).cloned().unwrap_or_default();
+                let disp = if group_nickname.is_empty() {
+                    contact_display.clone()
+                } else {
+                    group_nickname.clone()
+                };
                 let is_owner = uid == &owner && !owner.is_empty();
-                json!({ "username": uid, "display": disp, "is_owner": is_owner })
+                json!({
+                    "username": uid,
+                    "display": disp,
+                    "contact_display": contact_display,
+                    "group_nickname": group_nickname,
+                    "is_owner": is_owner,
+                })
             }).collect();
 
             // 群主排首位，其余按 display 字典序
@@ -1024,7 +1417,6 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
                 a["display"].as_str().unwrap_or("").cmp(b["display"].as_str().unwrap_or(""))
             });
 
-            let _ = display2; // 不在此 closure 内使用
             Ok(Some(members))
         }).await??;
 
@@ -1075,10 +1467,20 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
         sender_set.extend(senders);
     }
 
+    let group_nicknames = load_group_nicknames(db, &username).await.unwrap_or_default();
     let mut members: Vec<Value> = sender_set.iter().map(|u| {
+        let contact_display = names_map.get(u).cloned().unwrap_or_else(|| u.clone());
+        let group_nickname = group_nicknames.get(u).cloned().unwrap_or_default();
+        let display = if group_nickname.is_empty() {
+            contact_display.clone()
+        } else {
+            group_nickname.clone()
+        };
         json!({
             "username": u,
-            "display": names_map.get(u).cloned().unwrap_or_else(|| u.clone()),
+            "display": display,
+            "contact_display": contact_display,
+            "group_nickname": group_nickname,
             "is_owner": false,
         })
     }).collect();
@@ -1163,6 +1565,11 @@ pub async fn q_new_messages(
         let display = names.display(uname);
         let chat_type = chat_type_of(uname, names);
         let is_group = chat_type == "group";
+        let group_nicknames = if is_group {
+            load_group_nicknames(db, uname).await.unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
 
         for (db_path, table_name) in &tables {
             let path = db_path.clone();
@@ -1170,6 +1577,7 @@ pub async fn q_new_messages(
             let uname2 = uname.clone();
             let display2 = display.clone();
             let names_map = names.map.clone();
+            let group_nicknames2 = group_nicknames.clone();
             let tname_for_log = tname.clone();
 
             let msgs: Vec<Value> = match tokio::task::spawn_blocking(move || {
@@ -1201,7 +1609,7 @@ pub async fn q_new_messages(
                 let mut result = Vec::new();
                 for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
                     let content = decompress_message(&content_bytes, ct);
-                    let sender = sender_label(real_sender_id, &content, is_group, &uname2, &id2u, &names_map);
+                    let sender = sender_label(real_sender_id, &content, is_group, &uname2, &id2u, &names_map, &group_nicknames2);
                     let text = fmt_content(local_id, local_type, &content, is_group);
                     result.push(json!({
                         "chat": display2,
@@ -1376,6 +1784,11 @@ pub async fn q_stats(
     let mut type_counts: HashMap<String, i64> = HashMap::new();
     let mut sender_counts: HashMap<String, i64> = HashMap::new();
     let mut hour_counts = [0i64; 24];
+    let group_nicknames = if is_group {
+        load_group_nicknames(db, &username).await.unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
 
     for (db_path, table_name) in &tables {
         let path = db_path.clone();
@@ -1383,6 +1796,7 @@ pub async fn q_stats(
         let uname = username.clone();
         let is_group2 = is_group;
         let names_map = names.map.clone();
+        let group_nicknames2 = group_nicknames.clone();
 
         // 用 SQL GROUP BY 在数据库侧聚合，避免把全量消息内容加载进内存
         let result: (i64, HashMap<String, i64>, HashMap<String, i64>, [i64; 24]) =
@@ -1469,7 +1883,7 @@ pub async fn q_stats(
                             for (id, cnt) in rows.flatten() {
                                 if let Some(u) = id2u.get(&id) {
                                     if u != &uname {
-                                        let name = names_map.get(u).cloned().unwrap_or_else(|| u.clone());
+                                        let name = sender_display(u, "", &names_map, &group_nicknames2);
                                         *sender_c.entry(name).or_insert(0) += cnt;
                                     }
                                 }
@@ -1999,6 +2413,80 @@ pub async fn q_sns_search(
     let posts: Vec<Value> = parsed.into_iter().map(|p| post_to_value(p, names)).collect();
     let total = posts.len();
     Ok(json!({ "keyword": keyword, "posts": posts, "total": total }))
+}
+
+#[cfg(test)]
+mod group_nickname_tests {
+    use super::*;
+
+    fn varint(mut value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if value == 0 {
+                return out;
+            }
+        }
+    }
+
+    fn len_field(field_no: u64, bytes: &[u8]) -> Vec<u8> {
+        let mut out = varint((field_no << 3) | 2);
+        out.extend(varint(bytes.len() as u64));
+        out.extend(bytes);
+        out
+    }
+
+    fn string_field(field_no: u64, value: &str) -> Vec<u8> {
+        len_field(field_no, value.as_bytes())
+    }
+
+    fn member_chunk(username: &str, group_nickname: &str) -> Vec<u8> {
+        let mut member = Vec::new();
+        member.extend(string_field(1, username));
+        member.extend(string_field(2, group_nickname));
+        len_field(1, &member)
+    }
+
+    #[test]
+    fn parses_group_nickname_member_chunks() {
+        let mut ext_buffer = Vec::new();
+        ext_buffer.extend(member_chunk("wxid_alice", "Alice In Group"));
+        ext_buffer.extend(member_chunk("bob_123456", "Bob Card"));
+
+        let nicknames = parse_group_nickname_map(&ext_buffer, None);
+
+        assert_eq!(
+            nicknames.get("wxid_alice").map(String::as_str),
+            Some("Alice In Group")
+        );
+        assert_eq!(
+            nicknames.get("bob_123456").map(String::as_str),
+            Some("Bob Card")
+        );
+    }
+
+    #[test]
+    fn target_filter_anchors_member_username_choice() {
+        let mut member = Vec::new();
+        member.extend(string_field(3, "candidate_name"));
+        member.extend(string_field(4, "wxid_target"));
+        member.extend(string_field(2, "Target Card"));
+        let ext_buffer = len_field(1, &member);
+        let targets = HashSet::from(["wxid_target".to_string()]);
+
+        let nicknames = parse_group_nickname_map(&ext_buffer, Some(&targets));
+
+        assert_eq!(
+            nicknames.get("wxid_target").map(String::as_str),
+            Some("Target Card")
+        );
+        assert!(!nicknames.contains_key("candidate_name"));
+    }
 }
 
 #[cfg(test)]
