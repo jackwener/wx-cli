@@ -481,7 +481,9 @@ fn query_messages(
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?");
+        // WeChat 4.x 经常把 subtype 放在高 32 位：例如 19<<32 | 49、57<<32 | 49。
+        // CLI 的 --type 语义是按 base type 过滤，所以这里必须只比低 32 位。
+        clauses.push("(local_type & 4294967295) = ?");
         params.push(Box::new(t));
     }
     let where_clause = if clauses.is_empty() {
@@ -559,7 +561,8 @@ fn search_in_table(
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?".into());
+        // 搜索和 history 一样，按 base type 过滤，不能把高位 subtype 一起拿去做等值比较。
+        clauses.push("(local_type & 4294967295) = ?".into());
         params.push(Box::new(t));
     }
     let where_clause = format!("WHERE {}", clauses.join(" AND "));
@@ -646,6 +649,9 @@ fn sender_label(
 /// 读取消息内容列（兼容 TEXT 和 BLOB 两种存储类型）
 ///
 /// SQLite 中 message_content 在未压缩时为 TEXT，zstd 压缩后为 BLOB。
+/// 实测 WeChat 4.x 的 appmsg（含合并聊天记录 / 文件 / 引用）常常直接放在
+/// `message_content`，并由 `WCDB_CT_message_content = 4` 标记为 zstd 压缩；
+/// 不能假设这类 XML 一定在 `compress_content`。
 /// rusqlite 的 Vec<u8> FromSql 只接受 BLOB，读 TEXT 会静默返回空。
 fn get_content_bytes(row: &rusqlite::Row<'_>, idx: usize) -> Vec<u8> {
     // 先尝试 BLOB，再 fallback 到 TEXT→bytes
@@ -762,39 +768,257 @@ fn parse_sysmsg(xml: &str) -> Option<String> {
 }
 
 fn parse_appmsg(text: &str) -> Option<String> {
-    // 简单 XML 解析，避免引入重量级 XML 库（或直接用 minidom）
-    // 这里用基本字符串搜索实现
+    parse_appmsg_dom(text).or_else(|| parse_appmsg_legacy(text))
+}
+
+fn parse_appmsg_dom(text: &str) -> Option<String> {
+    // 真实数据里常见几类：
+    // - type=6: 文件
+    // - type=19: 合并聊天记录（recorditem 里还有一层 XML / CDATA）
+    // - type=57: 引用消息
+    // 先走 DOM 解析，容忍属性顺序、空标签写法和 CDATA；再退回 legacy 字符串提取兜底。
+    let doc = Document::parse(text).ok()?;
+    let appmsg = doc.descendants().find(|node| node.has_tag_name("appmsg"))?;
+    let title = xml_text(xml_child(appmsg, "title")).unwrap_or_default();
+    let atype = xml_text(xml_child(appmsg, "type")).unwrap_or_default();
+    match atype.as_str() {
+        "6" => Some(format_file_appmsg(appmsg, &title)),
+        "19" => Some(format_record_appmsg(appmsg, &title)),
+        "57" => Some(format_quote_appmsg(appmsg, &title)),
+        "33" | "36" | "44" => Some(if !title.is_empty() {
+            format!("[小程序] {}", title)
+        } else {
+            "[小程序]".into()
+        }),
+        _ => Some(if !title.is_empty() {
+            format!("[链接] {}", title)
+        } else {
+            "[链接/文件]".into()
+        }),
+    }
+}
+
+fn parse_appmsg_legacy(text: &str) -> Option<String> {
     let title = extract_xml_text(text, "title")?;
     let atype = extract_xml_text(text, "type").unwrap_or_default();
     match atype.as_str() {
-        "6" => Some(if !title.is_empty() { format!("[文件] {}", title) } else { "[文件]".into() }),
+        "6" => Some(if !title.is_empty() {
+            format!("[文件] {}", title)
+        } else {
+            "[文件]".into()
+        }),
+        "19" => Some(if !title.is_empty() {
+            format!("[合并聊天记录] {}", title)
+        } else {
+            "[合并聊天记录]".into()
+        }),
         "57" => {
             let ref_content = extract_xml_text(text, "content")
                 .map(|s| {
-                    // content 可能是 HTML 转义的 XML（被引用的消息是 appmsg 时）
                     let unescaped = unescape_html(&s);
-                    // 如果解转义后是 XML，尝试递归解析
                     if unescaped.contains("<appmsg") {
                         if let Some(parsed) = parse_appmsg(&unescaped) {
                             return parsed;
                         }
                     }
-                    let s: String = unescaped.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if s.chars().count() > 40 {
-                        format!("{}...", s.chars().take(40).collect::<String>())
-                    } else { s }
+                    collapse_text(&unescaped, 40)
                 })
                 .unwrap_or_default();
-            let quote = if !title.is_empty() { format!("[引用] {}", title) } else { "[引用]".into() };
+            let quote = if !title.is_empty() {
+                format!("[引用] {}", title)
+            } else {
+                "[引用]".into()
+            };
             if !ref_content.is_empty() {
                 Some(format!("{}\n  \u{21b3} {}", quote, ref_content))
             } else {
                 Some(quote)
             }
         }
-        "33" | "36" | "44" => Some(if !title.is_empty() { format!("[小程序] {}", title) } else { "[小程序]".into() }),
-        _ => Some(if !title.is_empty() { format!("[链接] {}", title) } else { "[链接/文件]".into() }),
+        "33" | "36" | "44" => Some(if !title.is_empty() {
+            format!("[小程序] {}", title)
+        } else {
+            "[小程序]".into()
+        }),
+        _ => Some(if !title.is_empty() {
+            format!("[链接] {}", title)
+        } else {
+            "[链接/文件]".into()
+        }),
     }
+}
+
+fn format_file_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let mut meta = Vec::new();
+    if let Some(size) = xml_child(appmsg, "appattach")
+        .and_then(|attach| xml_text(xml_child(attach, "totallen")))
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|size| *size > 0)
+    {
+        meta.push(format_byte_size(size));
+    }
+    if let Some(ext) = xml_child(appmsg, "appattach")
+        .and_then(|attach| xml_text(xml_child(attach, "fileext")))
+        .filter(|ext| !ext.is_empty())
+    {
+        meta.push(ext);
+    }
+    if let Some(md5) = xml_text(xml_child(appmsg, "md5")).filter(|md5| !md5.is_empty()) {
+        meta.push(format!("md5={}", md5));
+    }
+
+    let base = if !title.is_empty() {
+        format!("[文件] {}", title)
+    } else {
+        "[文件]".into()
+    };
+    if meta.is_empty() {
+        base
+    } else {
+        format!("{} ({})", base, meta.join(", "))
+    }
+}
+
+fn format_record_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let items = record_item_lines(appmsg);
+    let mut header = if !title.is_empty() {
+        format!("[合并聊天记录] {}", title)
+    } else {
+        "[合并聊天记录]".into()
+    };
+    if !items.is_empty() {
+        header.push_str(&format!(" ({}条)", items.len()));
+    }
+
+    let mut lines = vec![header];
+    if items.is_empty() {
+        if let Some(desc) = xml_text(xml_child(appmsg, "des")).filter(|desc| !desc.is_empty()) {
+            lines.push(format!("  {}", collapse_text(&desc, 120)));
+        }
+    } else {
+        for item in items.iter().take(10) {
+            lines.push(format!("  - {}", item));
+        }
+        if items.len() > 10 {
+            lines.push(format!("  - ... 还有{}条", items.len() - 10));
+        }
+    }
+    lines.join("\n")
+}
+
+fn format_quote_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let ref_content = xml_text(xml_child(appmsg, "content"))
+        .map(|content| {
+            let unescaped = unescape_html(&content);
+            if unescaped.contains("<appmsg") {
+                if let Some(parsed) = parse_appmsg(&unescaped) {
+                    return parsed;
+                }
+            }
+            collapse_text(&unescaped, 40)
+        })
+        .unwrap_or_default();
+    let quote = if !title.is_empty() {
+        format!("[引用] {}", title)
+    } else {
+        "[引用]".into()
+    };
+    if !ref_content.is_empty() {
+        format!("{}\n  \u{21b3} {}", quote, ref_content)
+    } else {
+        quote
+    }
+}
+
+fn record_item_lines<'a, 'input>(appmsg: Node<'a, 'input>) -> Vec<String> {
+    let mut lines = record_item_lines_from_node(appmsg);
+    if !lines.is_empty() {
+        return lines;
+    }
+
+    let Some(record_xml) = xml_text(xml_child(appmsg, "recorditem")).filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    let unescaped = unescape_html(&record_xml);
+    for candidate in [&record_xml, &unescaped] {
+        if let Ok(doc) = Document::parse(candidate) {
+            lines = record_item_lines_from_node(doc.root_element());
+            if !lines.is_empty() {
+                break;
+            }
+        }
+    }
+    lines
+}
+
+fn record_item_lines_from_node<'a, 'input>(node: Node<'a, 'input>) -> Vec<String> {
+    node.descendants()
+        .filter(|child| child.has_tag_name("dataitem"))
+        .filter_map(format_record_item)
+        .collect()
+}
+
+fn format_record_item<'a, 'input>(item: Node<'a, 'input>) -> Option<String> {
+    let name = first_child_text(item, &["sourcename", "datasrcname", "sourceusername"]);
+    let desc = first_child_text(item, &["datadesc", "datatitle", "datafmt"])
+        .or_else(|| item.attribute("datatype").and_then(record_datatype_label).map(str::to_string))?;
+    let desc = collapse_text(&desc, 100);
+    if let Some(name) = name.filter(|value| !value.is_empty()) {
+        Some(format!("{}: {}", name, desc))
+    } else {
+        Some(desc)
+    }
+}
+
+fn first_child_text<'a, 'input>(node: Node<'a, 'input>, tags: &[&str]) -> Option<String> {
+    tags.iter()
+        .find_map(|tag| xml_text(xml_child(node, tag)))
+        .filter(|value| !value.is_empty())
+}
+
+fn record_datatype_label(datatype: &str) -> Option<&'static str> {
+    match datatype {
+        "1" => Some("[文本]"),
+        "2" => Some("[图片]"),
+        "3" => Some("[语音]"),
+        "4" => Some("[视频]"),
+        "6" => Some("[文件]"),
+        "17" => Some("[链接]"),
+        _ => None,
+    }
+}
+
+fn collapse_text(text: &str, max_chars: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > max_chars {
+        format!("{}...", collapsed.chars().take(max_chars).collect::<String>())
+    } else {
+        collapsed
+    }
+}
+
+fn format_byte_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes_f >= GB {
+        format_decimal_unit(bytes_f / GB, "GB")
+    } else if bytes_f >= MB {
+        format_decimal_unit(bytes_f / MB, "MB")
+    } else if bytes_f >= KB {
+        format_decimal_unit(bytes_f / KB, "KB")
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn format_decimal_unit(value: f64, unit: &str) -> String {
+    let mut s = format!("{:.1}", value);
+    if s.ends_with(".0") {
+        s.truncate(s.len() - 2);
+    }
+    format!("{} {}", s, unit)
 }
 
 fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
@@ -827,6 +1051,386 @@ fn unescape_html(s: &str) -> String {
      .replace("&amp;", "&")
      .replace("&quot;", "\"")
      .replace("&apos;", "'")
+}
+
+#[cfg(test)]
+mod appmsg_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_forwarded_chat_record_expands_record_items() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>群聊的聊天记录</title>
+    <des>张三: 早上好
+李四: 收到</des>
+    <type>19</type>
+    <recorditem>&lt;recordinfo&gt;&lt;datalist count="2"&gt;&lt;dataitem datatype="1"&gt;&lt;sourcename&gt;张三&lt;/sourcename&gt;&lt;sourcetime&gt;1710000000&lt;/sourcetime&gt;&lt;datadesc&gt;早上好 &amp;amp; coffee&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;dataitem datatype="2"&gt;&lt;sourcename&gt;李四&lt;/sourcename&gt;&lt;sourcetime&gt;1710000060&lt;/sourcetime&gt;&lt;datafmt&gt;图片&lt;/datafmt&gt;&lt;datadesc&gt;[图片]&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/datalist&gt;&lt;/recordinfo&gt;</recorditem>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[合并聊天记录] 群聊的聊天记录 (2条)\n  - 张三: 早上好 & coffee\n  - 李四: [图片]")
+        );
+    }
+
+    #[test]
+    fn parse_file_appmsg_includes_safe_attachment_metadata() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>report.pdf</title>
+    <des />
+    <type>6</type>
+    <appattach>
+      <totallen>1536</totallen>
+      <attachid>@cdn_abc</attachid>
+      <fileext>pdf</fileext>
+    </appattach>
+    <md5>abcdef123456</md5>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[文件] report.pdf (1.5 KB, pdf, md5=abcdef123456)")
+        );
+    }
+
+    #[test]
+    fn query_messages_filters_on_base_msg_type_for_appmsg_rows() {
+        let db_path = std::env::temp_dir().join(format!(
+            "wx-cli-appmsg-filter-{}-{}.db",
+            std::process::id(),
+            Local::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let conn = Connection::open(&db_path).expect("create temp sqlite db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE Msg_test (
+                local_id INTEGER PRIMARY KEY,
+                local_type INTEGER,
+                create_time INTEGER,
+                real_sender_id INTEGER,
+                message_content TEXT,
+                WCDB_CT_message_content INTEGER
+            );
+            INSERT INTO Msg_test (
+                local_id, local_type, create_time, real_sender_id, message_content, WCDB_CT_message_content
+            ) VALUES (
+                1,
+                244813135921,
+                1710000000,
+                0,
+                '<msg><appmsg appid="" sdkver="0"><title>确实</title><des></des><action></action><type>57</type><content>同意</content></appmsg></msg>',
+                0
+            );
+            "#,
+        )
+        .expect("seed temp sqlite db");
+        drop(conn);
+
+        let rows = query_messages(
+            &db_path,
+            "Msg_test",
+            "wxid_test",
+            false,
+            &HashMap::new(),
+            None,
+            None,
+            Some(49),
+            10,
+            0,
+        )
+        .expect("query messages with masked base type");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["type"].as_str(), Some("链接/文件"));
+        assert_eq!(rows[0]["content"].as_str(), Some("[引用] 确实\n  ↳ 同意"));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    #[test]
+    #[ignore = "requires local ~/.wx-cli/cache message dbs"]
+    fn local_real_appmsg_probe() {
+        let message_dbs = local_message_cache_paths();
+        assert!(
+            !message_dbs.is_empty(),
+            "no local message dbs found in ~/.wx-cli/cache/_mtimes.json"
+        );
+
+        let mut base49_total = 0usize;
+        let mut appmsg_total = 0usize;
+        let mut parsed_total = 0usize;
+        let mut subtype_counts: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let mut subtype_samples: std::collections::BTreeMap<String, Vec<String>> =
+            std::collections::BTreeMap::new();
+        let mut raw_samples = Vec::new();
+
+        for db_path in message_dbs {
+            let conn = Connection::open(&db_path).expect("open cached message db");
+            let mut stmt = conn
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'")
+                .expect("list msg tables");
+            let tables: Vec<String> = stmt
+                .query_map([], |row| row.get(0))
+                .expect("query msg tables")
+                .filter_map(|row| row.ok())
+                .collect();
+
+            for table in tables {
+                let sql = format!(
+                    "SELECT local_type, message_content, WCDB_CT_message_content FROM [{}] \
+                     WHERE (local_type & 4294967295) = 49 ORDER BY create_time DESC LIMIT 200",
+                    table
+                );
+                let mut stmt = conn.prepare(&sql).expect("prepare appmsg rows");
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, i64>(0).unwrap_or(0),
+                            get_content_bytes(row, 1),
+                            row.get::<_, i64>(2).unwrap_or(0),
+                        ))
+                    })
+                    .expect("query appmsg rows");
+
+                for row in rows.flatten() {
+                    base49_total += 1;
+                    let content = decompress_message(&row.1, row.2);
+                    if raw_samples.len() < 5 {
+                        raw_samples.push(format!(
+                            "full_type={} subtype={} sample={}",
+                            row.0,
+                            row.0 >> 32,
+                            collapse_text(&content, 120)
+                        ));
+                    }
+                    if !content.contains("<appmsg") {
+                        continue;
+                    }
+                    appmsg_total += 1;
+
+                    let subtype = detect_appmsg_type(&content).unwrap_or_else(|| "unknown".into());
+                    *subtype_counts.entry(subtype.clone()).or_insert(0) += 1;
+
+                    if let Some(parsed) = parse_appmsg(&content) {
+                        parsed_total += 1;
+                        let entry = subtype_samples.entry(subtype.clone()).or_default();
+                        if entry.len() < 3 {
+                            entry.push(parsed);
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("local base49 total: {}", base49_total);
+        println!("local raw base49 samples: {:?}", raw_samples);
+        println!("local appmsg total: {}", appmsg_total);
+        println!("local parsed total: {}", parsed_total);
+        println!("local subtype counts: {:?}", subtype_counts);
+        for key in ["6", "19", "57", "5", "33"] {
+            if let Some(samples) = subtype_samples.get(key) {
+                println!("samples subtype {}: {:?}", key, samples);
+            }
+        }
+
+        assert!(base49_total > 0, "no local base49 rows found");
+        assert!(appmsg_total > 0, "no local appmsg rows found");
+        assert!(
+            parsed_total * 100 >= appmsg_total * 95,
+            "parse success rate too low: {}/{}",
+            parsed_total,
+            appmsg_total
+        );
+        if subtype_counts.get("6").copied().unwrap_or(0) > 0 {
+            assert!(
+                subtype_samples
+                    .get("6")
+                    .into_iter()
+                    .flat_map(|v| v.iter())
+                    .any(|sample| sample.starts_with("[文件]")),
+                "local type=6 samples did not format as file"
+            );
+        }
+        if subtype_counts.get("19").copied().unwrap_or(0) > 0 {
+            assert!(
+                subtype_samples
+                    .get("19")
+                    .into_iter()
+                    .flat_map(|v| v.iter())
+                    .any(|sample| sample.starts_with("[合并聊天记录]")),
+                "local type=19 samples did not format as merged chat records"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local ~/.wx-cli/cache filehelper merged record"]
+    fn local_latest_filehelper_merged_record_probe() {
+        let hash = format!("{:x}", md5::compute("filehelper".as_bytes()));
+        let message_dbs = local_message_cache_paths();
+        let mut hit = None;
+
+        'outer: for db_path in message_dbs {
+            let conn = Connection::open(&db_path).expect("open cached message db");
+            let table = format!("Msg_{}", hash);
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [&table],
+                    |row| row.get(0),
+                )
+                .expect("check filehelper table");
+            if exists == 0 {
+                continue;
+            }
+
+            let sql = format!(
+                "SELECT local_id, local_type, create_time, message_content, WCDB_CT_message_content \
+                 FROM [{}] WHERE ((local_type >> 32) = 19) ORDER BY create_time DESC LIMIT 1",
+                table
+            );
+            let row = conn
+                .query_row(&sql, [], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        get_content_bytes(row, 3),
+                        row.get::<_, i64>(4).unwrap_or(0),
+                    ))
+                })
+                .ok();
+            if let Some((local_id, local_type, ts, bytes, ct)) = row {
+                let content = decompress_message(&bytes, ct);
+                let parsed = parse_appmsg(&content);
+                hit = Some((db_path, local_id, local_type, ts, content, parsed));
+                break 'outer;
+            }
+        }
+
+        let (db_path, local_id, local_type, ts, content, parsed) =
+            hit.expect("no filehelper merged record found");
+        println!("db: {}", db_path.display());
+        println!("local_id: {}", local_id);
+        println!("local_type: {}", local_type);
+        println!("timestamp: {}", ts);
+        println!("raw: {}", collapse_text(&content, 500));
+        println!("parsed: {}", parsed.clone().unwrap_or_default());
+
+        assert!(content.contains("<appmsg"));
+        assert_eq!((local_type >> 32), 19);
+        assert!(
+            parsed
+                .as_deref()
+                .map(|s| s.starts_with("[合并聊天记录]"))
+                .unwrap_or(false),
+            "filehelper merged record was not parsed as merged record"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local ~/.wx-cli/cache filehelper latest base49 row"]
+    fn local_latest_filehelper_base49_probe() {
+        let hash = format!("{:x}", md5::compute("filehelper".as_bytes()));
+        let message_dbs = local_message_cache_paths();
+        let mut best: Option<(PathBuf, i64, i64, i64, Vec<u8>, i64)> = None;
+
+        for db_path in message_dbs {
+            let conn = Connection::open(&db_path).expect("open cached message db");
+            let table = format!("Msg_{}", hash);
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [&table],
+                    |row| row.get(0),
+                )
+                .expect("check filehelper table");
+            if exists == 0 {
+                continue;
+            }
+
+            let sql = format!(
+                "SELECT local_id, local_type, create_time, message_content, WCDB_CT_message_content \
+                 FROM [{}] WHERE ((local_type & 4294967295) = 49) ORDER BY create_time DESC LIMIT 1",
+                table
+            );
+            let row = conn
+                .query_row(&sql, [], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        get_content_bytes(row, 3),
+                        row.get::<_, i64>(4).unwrap_or(0),
+                    ))
+                })
+                .ok();
+            if let Some((local_id, local_type, ts, bytes, ct)) = row {
+                let replace = best
+                    .as_ref()
+                    .map(|(_, _, _, best_ts, _, _)| ts > *best_ts)
+                    .unwrap_or(true);
+                if replace {
+                    best = Some((db_path, local_id, local_type, ts, bytes, ct));
+                }
+            }
+        }
+
+        let (db_path, local_id, local_type, ts, bytes, ct) =
+            best.expect("no filehelper base49 row found");
+        let content = decompress_message(&bytes, ct);
+        let parsed = parse_appmsg(&content);
+
+        println!("db: {}", db_path.display());
+        println!("local_id: {}", local_id);
+        println!("local_type: {}", local_type);
+        println!("base_type: {}", local_type & 0xFFFF_FFFF);
+        println!("subtype: {}", local_type >> 32);
+        println!("timestamp: {}", ts);
+        println!("raw: {}", collapse_text(&content, 1200));
+        println!("parsed: {}", parsed.unwrap_or_default());
+
+        assert!(content.contains("<appmsg"));
+    }
+
+    fn local_message_cache_paths() -> Vec<PathBuf> {
+        let cache_dir = dirs::home_dir()
+            .expect("home dir")
+            .join(".wx-cli")
+            .join("cache");
+        let mtimes_path = cache_dir.join("_mtimes.json");
+        let raw = fs::read_to_string(&mtimes_path).expect("read _mtimes.json");
+        let value: Value = serde_json::from_str(&raw).expect("parse _mtimes.json");
+        let mut paths = Vec::new();
+        if let Some(obj) = value.as_object() {
+            for (rel, meta) in obj {
+                if !rel.starts_with("message/") {
+                    continue;
+                }
+                if let Some(path) = meta.get("path").and_then(Value::as_str) {
+                    paths.push(PathBuf::from(path));
+                }
+            }
+        }
+        paths
+    }
+
+    fn detect_appmsg_type(content: &str) -> Option<String> {
+        let doc = Document::parse(content).ok()?;
+        let appmsg = doc.descendants().find(|node| node.has_tag_name("appmsg"))?;
+        xml_text(xml_child(appmsg, "type"))
+    }
 }
 
 fn fmt_time(ts: i64, fmt: &str) -> String {
