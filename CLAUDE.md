@@ -30,6 +30,19 @@ brew install mingw-w64   # 提供 x86_64-w64-mingw32-gcc，zstd-sys 等 C 依赖
 
 动任何 IPC / 网络代码时：**两端必须用同一个库、同一套 API**。例如 server 用 `interprocess::local_socket::tokio::Listener`，client 就必须用 `interprocess::local_socket::Stream::connect`，不能用 `std::fs::OpenOptions` 打开同名路径——即使 kernel 名字对上了，底层的 framing / overlapped 模式也不兼容。
 
+## 消息解析坑
+
+- WeChat 4.x 的 `local_type` 经常把 subtype 编进高 32 位：例如 `5<<32 | 49`、`19<<32 | 49`、`57<<32 | 49`
+- CLI 里的 `--type link|file` 语义是按 base type 过滤，所以 SQL 必须比较低 32 位，不能直接写 `local_type = 49`
+- 合并聊天记录 / 文件 / 引用消息的 XML 实测通常就在 `message_content`，并由 `WCDB_CT_message_content = 4` 表示 zstd 压缩；不要先假设这类内容只会出现在 `compress_content`
+- `type=19` 的合并聊天记录里，`recorditem` 常常是 CDATA 包的一层内嵌 XML，需要先解 CDATA 再解析 `recordinfo/datalist/dataitem`
+
+## 本地验证坑
+
+- CLI 实际通过 Unix socket 复用后台 `wx-daemon`；如果你刚切到新编译的二进制做验证，但旧 daemon 还活着，看到的仍然会是旧进程算出来的结果
+- 验证“刚发的新消息”时，先 `wx daemon stop`，再重跑目标命令
+- 本地真实数据探针放在 `src/daemon/query.rs` 的 `#[ignore]` 测试里，需要时显式运行
+
 ## Cargo.toml 修改规则
 
 - 修改版本号后，必须运行 `cargo update --workspace` 更新 Cargo.lock
