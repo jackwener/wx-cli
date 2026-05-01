@@ -1202,8 +1202,25 @@ fn parse_sysmsg(xml: &str) -> Option<String> {
 }
 
 fn parse_appmsg(text: &str) -> Option<String> {
-    // 简单 XML 解析，避免引入重量级 XML 库（或直接用 minidom）
-    // 这里用基本字符串搜索实现
+    if let Some(parsed) = parse_appmsg_dom(text) {
+        return Some(parsed);
+    }
+    parse_appmsg_legacy(text)
+}
+
+fn parse_appmsg_dom(text: &str) -> Option<String> {
+    let doc = Document::parse(text).ok()?;
+    let appmsg = doc.descendants().find(|node| node.has_tag_name("appmsg"))?;
+    let title = xml_text(xml_child(appmsg, "title")).unwrap_or_default();
+    let atype = xml_text(xml_child(appmsg, "type")).unwrap_or_default();
+    match atype.as_str() {
+        "6" => Some(format_file_appmsg(appmsg, &title)),
+        "19" => Some(format_record_appmsg(appmsg, &title)),
+        _ => None,
+    }
+}
+
+fn parse_appmsg_legacy(text: &str) -> Option<String> {
     let title = extract_xml_text(text, "title")?;
     let atype = extract_xml_text(text, "type").unwrap_or_default();
     match atype.as_str() {
@@ -1221,6 +1238,119 @@ fn parse_appmsg(text: &str) -> Option<String> {
         }
         "33" | "36" | "44" => Some(if !title.is_empty() { format!("[小程序] {}", title) } else { "[小程序]".into() }),
         _ => Some(if !title.is_empty() { format!("[链接] {}", title) } else { "[链接/文件]".into() }),
+    }
+}
+
+fn format_file_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let mut meta = Vec::new();
+    if let Some(size) = xml_child(appmsg, "appattach")
+        .and_then(|attach| xml_text(xml_child(attach, "totallen")))
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|size| *size > 0)
+    {
+        meta.push(format_byte_size(size));
+    }
+    if let Some(ext) = xml_child(appmsg, "appattach")
+        .and_then(|attach| xml_text(xml_child(attach, "fileext")))
+        .filter(|ext| !ext.is_empty())
+    {
+        meta.push(ext);
+    }
+
+    let base = if !title.is_empty() {
+        format!("[文件] {}", title)
+    } else {
+        "[文件]".into()
+    };
+    if meta.is_empty() {
+        base
+    } else {
+        format!("{} ({})", base, meta.join(", "))
+    }
+}
+
+fn format_record_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let items = record_item_lines(appmsg);
+    let mut header = if !title.is_empty() {
+        format!("[合并聊天记录] {}", title)
+    } else {
+        "[合并聊天记录]".into()
+    };
+    if !items.is_empty() {
+        header.push_str(&format!(" ({}条)", items.len()));
+    }
+
+    let mut lines = vec![header];
+    if items.is_empty() {
+        if let Some(desc) = xml_text(xml_child(appmsg, "des")).filter(|desc| !desc.is_empty()) {
+            lines.push(format!("  {}", collapse_text(&desc, 120)));
+        }
+    } else {
+        for item in items.iter().take(10) {
+            lines.push(format!("  - {}", item));
+        }
+        if items.len() > 10 {
+            lines.push(format!("  - ... 还有{}条", items.len() - 10));
+        }
+    }
+    lines.join("\n")
+}
+
+fn record_item_lines<'a, 'input>(appmsg: Node<'a, 'input>) -> Vec<String> {
+    let mut lines = record_item_lines_from_node(appmsg);
+    if !lines.is_empty() {
+        return lines;
+    }
+
+    let Some(record_xml) = xml_text(xml_child(appmsg, "recorditem")).filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    let unescaped = unescape_html(&record_xml);
+    for candidate in [&record_xml, &unescaped] {
+        if let Ok(doc) = Document::parse(candidate) {
+            lines = record_item_lines_from_node(doc.root_element());
+            if !lines.is_empty() {
+                break;
+            }
+        }
+    }
+    lines
+}
+
+fn record_item_lines_from_node<'a, 'input>(node: Node<'a, 'input>) -> Vec<String> {
+    node.descendants()
+        .filter(|child| child.has_tag_name("dataitem"))
+        .filter_map(format_record_item)
+        .collect()
+}
+
+fn format_record_item<'a, 'input>(item: Node<'a, 'input>) -> Option<String> {
+    let name = first_child_text(item, &["sourcename", "datasrcname", "sourceusername"]);
+    let desc = first_child_text(item, &["datadesc", "datatitle", "datafmt"])
+        .or_else(|| item.attribute("datatype").and_then(record_datatype_label).map(str::to_string))?;
+    let desc = collapse_text(&desc, 100);
+    if let Some(name) = name.filter(|value| !value.is_empty()) {
+        Some(format!("{}: {}", name, desc))
+    } else {
+        Some(desc)
+    }
+}
+
+fn first_child_text<'a, 'input>(node: Node<'a, 'input>, tags: &[&str]) -> Option<String> {
+    tags.iter()
+        .find_map(|tag| xml_text(xml_child(node, tag)))
+        .filter(|value| !value.is_empty())
+}
+
+fn record_datatype_label(datatype: &str) -> Option<&'static str> {
+    match datatype {
+        "1" => Some("[文本]"),
+        "2" => Some("[图片]"),
+        "3" => Some("[语音]"),
+        "4" => Some("[视频]"),
+        "6" => Some("[文件]"),
+        "17" => Some("[链接]"),
+        _ => None,
     }
 }
 
@@ -1272,6 +1402,30 @@ fn collapse_text(text: &str, max_chars: usize) -> String {
     } else {
         collapsed
     }
+}
+
+fn format_byte_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes_f >= GB {
+        format_decimal_unit(bytes_f / GB, "GB")
+    } else if bytes_f >= MB {
+        format_decimal_unit(bytes_f / MB, "MB")
+    } else if bytes_f >= KB {
+        format_decimal_unit(bytes_f / KB, "KB")
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn format_decimal_unit(value: f64, unit: &str) -> String {
+    let mut s = format!("{:.1}", value);
+    if s.ends_with(".0") {
+        s.truncate(s.len() - 2);
+    }
+    format!("{} {}", s, unit)
 }
 
 fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
@@ -1340,6 +1494,48 @@ fn unescape_html(s: &str) -> String {
 #[cfg(test)]
 mod appmsg_tests {
     use super::*;
+
+    #[test]
+    fn parse_forwarded_chat_record_expands_record_items() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>群聊的聊天记录</title>
+    <des>张三: 早上好
+李四: 收到</des>
+    <type>19</type>
+    <recorditem>&lt;recordinfo&gt;&lt;datalist count="2"&gt;&lt;dataitem datatype="1"&gt;&lt;sourcename&gt;张三&lt;/sourcename&gt;&lt;sourcetime&gt;1710000000&lt;/sourcetime&gt;&lt;datadesc&gt;早上好 &amp;amp; coffee&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;dataitem datatype="2"&gt;&lt;sourcename&gt;李四&lt;/sourcename&gt;&lt;sourcetime&gt;1710000060&lt;/sourcetime&gt;&lt;datafmt&gt;图片&lt;/datafmt&gt;&lt;datadesc&gt;[图片]&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/datalist&gt;&lt;/recordinfo&gt;</recorditem>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[合并聊天记录] 群聊的聊天记录 (2条)\n  - 张三: 早上好 & coffee\n  - 李四: [图片]")
+        );
+    }
+
+    #[test]
+    fn parse_file_appmsg_includes_attachment_metadata() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>report.pdf</title>
+    <type>6</type>
+    <appattach>
+      <totallen>1536</totallen>
+      <fileext>pdf</fileext>
+    </appattach>
+    <md5>abcdef123456</md5>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[文件] report.pdf (1.5 KB, pdf)")
+        );
+    }
 
     #[test]
     fn parse_quote_appmsg_reads_refermsg_content() {
