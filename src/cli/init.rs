@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::collections::HashMap;
 
+use crate::cli::transport::{stop_daemon, StopDaemonOutcome};
 use crate::config;
 use crate::scanner;
 
@@ -14,14 +15,20 @@ pub fn cmd_init(force: bool) -> Result<()> {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&content) {
                 let db_dir = cfg.get("db_dir").and_then(|v| v.as_str()).unwrap_or("");
-                let keys_file = cfg.get("keys_file").and_then(|v| v.as_str()).unwrap_or("all_keys.json");
+                let keys_file = cfg
+                    .get("keys_file")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("all_keys.json");
                 let keys_path = if std::path::Path::new(keys_file).is_absolute() {
                     std::path::PathBuf::from(keys_file)
                 } else {
-                    config_path.parent().unwrap_or(std::path::Path::new("."))
+                    config_path
+                        .parent()
+                        .unwrap_or(std::path::Path::new("."))
                         .join(keys_file)
                 };
-                if !db_dir.is_empty() && !db_dir.contains("your_wxid")
+                if !db_dir.is_empty()
+                    && !db_dir.contains("your_wxid")
                     && std::path::Path::new(db_dir).exists()
                     && keys_path.exists()
                 {
@@ -50,6 +57,20 @@ pub fn cmd_init(force: bool) -> Result<()> {
     #[cfg(unix)]
     drop_privileges_if_sudo()?;
 
+    // --force：先停 daemon 并清空解密缓存，避免旧缓存与新密钥 mtime 一致仍被复用
+    if force {
+        println!("(--force) 停止 wx-daemon 并清空解密缓存…");
+        match stop_daemon()? {
+            StopDaemonOutcome::NoPidFile => {}
+            StopDaemonOutcome::Stopped(pid) => println!("已停止 wx-daemon (PID {})", pid),
+            StopDaemonOutcome::StalePid(pid) => {
+                println!("wx-daemon (PID {}) 已不在运行，已清理残留文件", pid);
+            }
+        }
+        clear_decrypt_cache()?;
+        println!("已清空 {}", config::cache_dir().display());
+    }
+
     // 确保父目录存在（如 ~/.wx-cli/），必须在任何写入之前
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)
@@ -57,15 +78,19 @@ pub fn cmd_init(force: bool) -> Result<()> {
     }
 
     // Step 3: 保存 all_keys.json
-    let keys_file_path = config_path.parent()
+    let keys_file_path = config_path
+        .parent()
         .unwrap_or(std::path::Path::new("."))
         .join("all_keys.json");
 
     let mut keys_json = serde_json::Map::new();
     for entry in &entries {
-        keys_json.insert(entry.db_name.clone(), json!({
-            "enc_key": entry.enc_key,
-        }));
+        keys_json.insert(
+            entry.db_name.clone(),
+            json!({
+                "enc_key": entry.enc_key,
+            }),
+        );
     }
     std::fs::write(&keys_file_path, serde_json::to_string_pretty(&keys_json)?)
         .context("写入 all_keys.json 失败")?;
@@ -85,14 +110,28 @@ pub fn cmd_init(force: bool) -> Result<()> {
         }
     }
     cfg.insert("db_dir".into(), json!(db_dir.to_string_lossy()));
-    cfg.entry("keys_file".into()).or_insert_with(|| json!("all_keys.json"));
-    cfg.entry("decrypted_dir".into()).or_insert_with(|| json!("decrypted"));
+    cfg.entry("keys_file".into())
+        .or_insert_with(|| json!("all_keys.json"));
+    cfg.entry("decrypted_dir".into())
+        .or_insert_with(|| json!("decrypted"));
 
     std::fs::write(&config_path, serde_json::to_string_pretty(&cfg)?)
         .context("写入 config.json 失败")?;
     println!("配置已保存: {}", config_path.display());
     println!("初始化完成，可以使用 wx sessions / wx history 等命令了");
 
+    Ok(())
+}
+
+/// 删除 `~/.wx-cli/cache`（含 `_mtimes.json` 与已解密 DB），并重建空目录。
+fn clear_decrypt_cache() -> Result<()> {
+    let dir = config::cache_dir();
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .with_context(|| format!("删除解密缓存目录失败: {}", dir.display()))?;
+    }
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("创建解密缓存目录失败: {}", dir.display()))?;
     Ok(())
 }
 
@@ -129,7 +168,9 @@ fn drop_privileges_if_sudo() -> Result<()> {
     }
 
     // 设置 umask，让后续 create 出来的文件/目录默认是 0600 / 0700。
-    unsafe { libc::umask(0o077); }
+    unsafe {
+        libc::umask(0o077);
+    }
 
     // 必须先 setgid 再 setuid：一旦 uid 降下来就没法再改 gid 了。
     unsafe {
@@ -153,8 +194,9 @@ fn drop_privileges_if_sudo() -> Result<()> {
         Ok(())
     }
     fn chown_one(path: &Path, uid: u32, gid: u32) -> std::io::Result<()> {
-        let c = CString::new(path.as_os_str().as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"))?;
+        let c = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL")
+        })?;
         if unsafe { libc::chown(c.as_ptr(), uid, gid) } != 0 {
             return Err(std::io::Error::last_os_error());
         }
