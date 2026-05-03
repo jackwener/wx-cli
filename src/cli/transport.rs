@@ -52,6 +52,68 @@ pub fn is_alive() -> bool {
     }
 }
 
+/// [`stop_daemon`] 的返回值，供 CLI 提示或 `wx init --force` 选用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopDaemonOutcome {
+    /// 无 `daemon.pid`
+    NoPidFile,
+    /// 已向进程发送停止信号并清理 pid/socket
+    Stopped(u32),
+    /// 进程已不存在，仅清理 pid/socket
+    StalePid(u32),
+}
+
+/// 停止 wx-daemon（与 `wx daemon stop` 同一套逻辑）。
+pub fn stop_daemon() -> Result<StopDaemonOutcome> {
+    let pid_path = config::pid_path();
+    if !pid_path.exists() {
+        return Ok(StopDaemonOutcome::NoPidFile);
+    }
+
+    let pid_str = std::fs::read_to_string(&pid_path)?;
+    let pid: u32 = pid_str
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("PID 文件格式错误"))?;
+
+    #[cfg(unix)]
+    {
+        let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        if ret != 0 {
+            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+            if errno == libc::ESRCH {
+                let _ = std::fs::remove_file(config::sock_path());
+                let _ = std::fs::remove_file(&pid_path);
+                return Ok(StopDaemonOutcome::StalePid(pid));
+            }
+            anyhow::bail!("发送 SIGTERM 失败 (errno {})", errno);
+        }
+        let _ = std::fs::remove_file(config::sock_path());
+        let _ = std::fs::remove_file(&pid_path);
+        return Ok(StopDaemonOutcome::Stopped(pid));
+    }
+
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output();
+        let ok = matches!(&out, Ok(o) if o.status.success());
+        let _ = std::fs::remove_file(config::sock_path());
+        let _ = std::fs::remove_file(&pid_path);
+        return Ok(if ok {
+            StopDaemonOutcome::Stopped(pid)
+        } else {
+            StopDaemonOutcome::StalePid(pid)
+        });
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        anyhow::bail!("当前平台不支持 stop_daemon");
+    }
+}
+
 /// 确保 daemon 运行，必要时自动启动
 pub fn ensure_daemon() -> Result<()> {
     if is_alive() {
@@ -113,7 +175,8 @@ fn start_daemon() -> Result<()> {
             let _ = std::fs::create_dir_all(parent);
         }
         let (stdout_stdio, stderr_stdio) = std::fs::OpenOptions::new()
-            .create(true).append(true)
+            .create(true)
+            .append(true)
             .open(&log_path)
             .and_then(|f| f.try_clone().map(|g| (f, g)))
             .map(|(f, g)| (std::process::Stdio::from(f), std::process::Stdio::from(g)))
@@ -124,7 +187,12 @@ fn start_daemon() -> Result<()> {
             .stdout(stdout_stdio)
             .stderr(stderr_stdio);
         // SAFETY: setsid() 在 fork 后的子进程中调用，使 daemon 脱离控制终端
-        unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
         let _ = cmd.spawn().context("无法启动 daemon 进程")?;
     }
 
@@ -136,7 +204,8 @@ fn start_daemon() -> Result<()> {
             let _ = std::fs::create_dir_all(parent);
         }
         let (stdout_stdio, stderr_stdio) = std::fs::OpenOptions::new()
-            .create(true).append(true)
+            .create(true)
+            .append(true)
             .open(&log_path)
             .and_then(|f| f.try_clone().map(|g| (f, g)))
             .map(|(f, g)| (std::process::Stdio::from(f), std::process::Stdio::from(g)))
@@ -189,10 +258,11 @@ pub fn send(req: Request) -> Result<Response> {
 fn send_unix(req: Request) -> Result<Response> {
     use std::os::unix::net::UnixStream;
     let sock_path = config::sock_path();
-    let mut stream = UnixStream::connect(&sock_path)
-        .context("连接 daemon socket 失败")?;
+    let mut stream = UnixStream::connect(&sock_path).context("连接 daemon socket 失败")?;
     stream.set_read_timeout(Some(Duration::from_secs(120))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(120))).ok();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(120)))
+        .ok();
 
     let req_str = serde_json::to_string(&req)? + "\n";
     stream.write_all(req_str.as_bytes())?;
@@ -201,8 +271,7 @@ fn send_unix(req: Request) -> Result<Response> {
     let mut reader = BufReader::new(&stream);
     reader.read_line(&mut line)?;
 
-    let resp: Response = serde_json::from_str(&line)
-        .context("解析 daemon 响应失败")?;
+    let resp: Response = serde_json::from_str(&line).context("解析 daemon 响应失败")?;
 
     if !resp.ok {
         bail!("{}", resp.error.as_deref().unwrap_or("未知错误"));
@@ -215,10 +284,10 @@ fn send_unix(req: Request) -> Result<Response> {
 fn send_windows(req: Request) -> Result<Response> {
     use interprocess::local_socket::{prelude::*, GenericNamespaced, Stream};
 
-    let name = "wx-cli-daemon".to_ns_name::<GenericNamespaced>()
+    let name = "wx-cli-daemon"
+        .to_ns_name::<GenericNamespaced>()
         .context("构造 pipe name 失败")?;
-    let stream = Stream::connect(name)
-        .context("连接 daemon named pipe 失败")?;
+    let stream = Stream::connect(name).context("连接 daemon named pipe 失败")?;
 
     // interprocess::Stream 同时实现 Read + Write，但需要拆分读写端
     let mut reader = BufReader::new(stream);
@@ -229,8 +298,7 @@ fn send_windows(req: Request) -> Result<Response> {
     let mut line = String::new();
     reader.read_line(&mut line)?;
 
-    let resp: Response = serde_json::from_str(&line)
-        .context("解析 daemon 响应失败")?;
+    let resp: Response = serde_json::from_str(&line).context("解析 daemon 响应失败")?;
 
     if !resp.ok {
         bail!("{}", resp.error.as_deref().unwrap_or("未知错误"));

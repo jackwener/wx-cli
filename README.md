@@ -125,6 +125,8 @@ sudo wx init
 wx init
 ```
 
+**重新扫描密钥**（`sudo wx init --force` 或 `wx init --force`）时，会在写入新密钥前**停止正在运行的 wx-daemon**，并**清空 `~/.wx-cli/cache` 解密缓存**（含 `_mtimes.json`），避免仅因 mtime 未变而继续复用按旧密钥解出的缓存文件。
+
 验证安装：
 
 ```bash

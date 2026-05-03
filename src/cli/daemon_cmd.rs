@@ -1,7 +1,7 @@
-use anyhow::Result;
-use crate::config;
-use crate::cli::DaemonCommands;
 use crate::cli::transport;
+use crate::cli::DaemonCommands;
+use crate::config;
+use anyhow::Result;
 
 pub fn cmd_daemon(cmd: DaemonCommands) -> Result<()> {
     match cmd {
@@ -25,42 +25,13 @@ fn cmd_status() -> Result<()> {
 }
 
 fn cmd_stop() -> Result<()> {
-    let pid_path = config::pid_path();
-    if !pid_path.exists() {
-        println!("daemon 未运行");
-        return Ok(());
-    }
-
-    let pid_str = std::fs::read_to_string(&pid_path)?;
-    let pid: u32 = pid_str.trim().parse()
-        .map_err(|_| anyhow::anyhow!("PID 文件格式错误"))?;
-
-    #[cfg(unix)]
-    {
-        let ret = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
-        if ret != 0 {
-            let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
-            if errno == libc::ESRCH {
-                println!("wx-daemon (PID {}) 已不在运行，清理残留文件", pid);
-            } else {
-                anyhow::bail!("发送 SIGTERM 失败 (errno {})", errno);
-            }
-        } else {
-            println!("已停止 wx-daemon (PID {})", pid);
+    match transport::stop_daemon()? {
+        transport::StopDaemonOutcome::NoPidFile => println!("daemon 未运行"),
+        transport::StopDaemonOutcome::Stopped(pid) => println!("已停止 wx-daemon (PID {})", pid),
+        transport::StopDaemonOutcome::StalePid(pid) => {
+            println!("wx-daemon (PID {}) 已不在运行，清理残留文件", pid);
         }
     }
-
-    #[cfg(windows)]
-    {
-        std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .output()?;
-        println!("已停止 wx-daemon (PID {})", pid);
-    }
-
-    let _ = std::fs::remove_file(config::sock_path());
-    let _ = std::fs::remove_file(&pid_path);
-
     Ok(())
 }
 
@@ -89,19 +60,25 @@ fn cmd_logs(follow: bool, lines: usize) -> Result<()> {
             file.read_to_string(&mut content)?;
             let all_lines: Vec<&str> = content.lines().collect();
             let show = &all_lines[all_lines.len().saturating_sub(lines)..];
-            for line in show { println!("{}", line); }
+            for line in show {
+                println!("{}", line);
+            }
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 let mut buf = String::new();
                 file.read_to_string(&mut buf)?;
-                if !buf.is_empty() { print!("{}", buf); }
+                if !buf.is_empty() {
+                    print!("{}", buf);
+                }
             }
         }
     } else {
         let content = std::fs::read_to_string(&log_path)?;
         let all_lines: Vec<&str> = content.lines().collect();
         let show = &all_lines[all_lines.len().saturating_sub(lines)..];
-        for line in show { println!("{}", line); }
+        for line in show {
+            println!("{}", line);
+        }
     }
 
     Ok(())
