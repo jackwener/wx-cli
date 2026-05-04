@@ -140,6 +140,15 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 群聊消息里的 `last_sender`、`sender` 和 `stats.top_senders` 会优先显示群昵称（群名片）。如果本地数据库没有群昵称，再回退到联系人备注、微信昵称或 username。
 
+引用消息（appmsg `type=57`）在 `history` / `search` / `new-messages` 输出里会展开为两行：第一行是当前回复，第二行以 `↳` 开头显示被引用原文，例如：
+
+```text
+[引用] 当前回复
+  ↳ 发送者: 被引用内容
+```
+
+`--type link` / `--type file` 会覆盖微信 appmsg 的链接、文件、合并聊天记录和引用消息等变体；`search --type link` 也会匹配解压并格式化后的引用原文。
+
 ### 联系人与群组
 
 ```bash
