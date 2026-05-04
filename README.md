@@ -156,6 +156,15 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 
+引用消息会在 `history` / `search` / `new-messages` 输出中显示当前回复和被引用原文：
+
+```text
+[引用] 当前回复
+  ↳ 发送者: 被引用内容
+```
+
+`--type link` / `--type file` 会包含微信 appmsg 里的链接、文件、合并聊天记录和引用消息等变体；搜索时也会匹配解压后可见的引用原文。
+
 ### 朋友圈（SNS）
 
 三个独立命令，区分"通知"和"帖子"：

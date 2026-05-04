@@ -137,6 +137,15 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 `wx unread --filter` 支持 `private` / `group` / `official` / `folded` / `all`，逗号分隔多选。默认 `all`。
 
+引用消息（appmsg `type=57`）在 `history` / `search` / `new-messages` 输出里会展开为两行：第一行是当前回复，第二行以 `↳` 开头显示被引用原文，例如：
+
+```text
+[引用] 当前回复
+  ↳ 发送者: 被引用内容
+```
+
+`--type link` / `--type file` 会覆盖微信 appmsg 的链接、文件、合并聊天记录和引用消息等变体；`search --type link` 也会匹配解压并格式化后的引用原文。
+
 ### 联系人与群组
 
 ```bash
