@@ -470,19 +470,18 @@ fn query_messages(
     let conn = Connection::open(db_path)?;
     let id2u = load_id2u(&conn);
 
-    let mut clauses = Vec::new();
+    let mut clauses: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(s) = since {
-        clauses.push("create_time >= ?");
+        clauses.push("create_time >= ?".into());
         params.push(Box::new(s));
     }
     if let Some(u) = until {
-        clauses.push("create_time <= ?");
+        clauses.push("create_time <= ?".into());
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?");
-        params.push(Box::new(t));
+        push_msg_type_filter(&mut clauses, &mut params, t);
     }
     let where_clause = if clauses.is_empty() {
         String::new()
@@ -548,8 +547,14 @@ fn search_in_table(
     let id2u = load_id2u(conn);
     // 转义 LIKE 通配符，使用 '\' 作为 ESCAPE 字符
     let escaped_kw = keyword.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    let mut clauses = vec!["message_content LIKE ? ESCAPE '\\'".to_string()];
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(format!("%{}%", escaped_kw))];
+    let search_decoded_content = msg_type == Some(49);
+    let keyword_lower = keyword.to_lowercase();
+    let mut clauses: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if !search_decoded_content {
+        clauses.push("message_content LIKE ? ESCAPE '\\'".to_string());
+        params.push(Box::new(format!("%{}%", escaped_kw)));
+    }
     if let Some(s) = since {
         clauses.push("create_time >= ?".into());
         params.push(Box::new(s));
@@ -559,17 +564,23 @@ fn search_in_table(
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?".into());
-        params.push(Box::new(t));
+        push_msg_type_filter(&mut clauses, &mut params, t);
     }
-    let where_clause = format!("WHERE {}", clauses.join(" AND "));
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", clauses.join(" AND "))
+    };
+    let limit_clause = if search_decoded_content { "" } else { " LIMIT ?" };
     let sql = format!(
         "SELECT local_id, local_type, create_time, real_sender_id,
                 message_content, WCDB_CT_message_content
-         FROM [{}] {} ORDER BY create_time DESC LIMIT ?",
-        table, where_clause
+         FROM [{}] {} ORDER BY create_time DESC{}",
+        table, where_clause, limit_clause
     );
-    params.push(Box::new(limit as i64));
+    if !search_decoded_content {
+        params.push(Box::new(limit as i64));
+    }
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
@@ -591,6 +602,9 @@ fn search_in_table(
         let content = decompress_message(&content_bytes, ct);
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
         let text = fmt_content(local_id, local_type, &content, is_group);
+        if search_decoded_content && !matches_search_text(&content, &text, keyword, &keyword_lower) {
+            continue;
+        }
 
         result.push(json!({
             "timestamp": ts,
@@ -600,8 +614,30 @@ fn search_in_table(
             "content": text,
             "type": fmt_type(local_type),
         }));
+        if search_decoded_content && result.len() >= limit {
+            break;
+        }
     }
     Ok(result)
+}
+
+fn push_msg_type_filter(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    msg_type: i64,
+) {
+    clauses.push("(local_type & 4294967295) = ?".into());
+    params.push(Box::new(msg_type));
+}
+
+fn matches_search_text(raw: &str, formatted: &str, keyword: &str, keyword_lower: &str) -> bool {
+    contains_search_text(raw, keyword, keyword_lower)
+        || contains_search_text(formatted, keyword, keyword_lower)
+}
+
+fn contains_search_text(haystack: &str, keyword: &str, keyword_lower: &str) -> bool {
+    haystack.contains(keyword)
+        || (!keyword_lower.is_empty() && haystack.to_lowercase().contains(keyword_lower))
 }
 
 fn load_id2u(conn: &Connection) -> HashMap<i64, String> {
@@ -769,21 +805,8 @@ fn parse_appmsg(text: &str) -> Option<String> {
     match atype.as_str() {
         "6" => Some(if !title.is_empty() { format!("[文件] {}", title) } else { "[文件]".into() }),
         "57" => {
-            let ref_content = extract_xml_text(text, "content")
-                .map(|s| {
-                    // content 可能是 HTML 转义的 XML（被引用的消息是 appmsg 时）
-                    let unescaped = unescape_html(&s);
-                    // 如果解转义后是 XML，尝试递归解析
-                    if unescaped.contains("<appmsg") {
-                        if let Some(parsed) = parse_appmsg(&unescaped) {
-                            return parsed;
-                        }
-                    }
-                    let s: String = unescaped.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if s.chars().count() > 40 {
-                        format!("{}...", s.chars().take(40).collect::<String>())
-                    } else { s }
-                })
+            let ref_content = quote_refermsg_content(text)
+                .or_else(|| extract_xml_text(text, "content").and_then(|s| quote_content_text(&s, 40)))
                 .unwrap_or_default();
             let quote = if !title.is_empty() { format!("[引用] {}", title) } else { "[引用]".into() };
             if !ref_content.is_empty() {
@@ -794,6 +817,56 @@ fn parse_appmsg(text: &str) -> Option<String> {
         }
         "33" | "36" | "44" => Some(if !title.is_empty() { format!("[小程序] {}", title) } else { "[小程序]".into() }),
         _ => Some(if !title.is_empty() { format!("[链接] {}", title) } else { "[链接/文件]".into() }),
+    }
+}
+
+fn quote_refermsg_content(text: &str) -> Option<String> {
+    let refer = extract_xml_text(text, "refermsg")?;
+    let content = extract_xml_text(&refer, "content")
+        .and_then(|s| quote_content_text(&s, 80))
+        .or_else(|| {
+            extract_xml_text(&refer, "type")
+                .and_then(|t| quote_refermsg_type_label(&t).map(str::to_string))
+        })?;
+    match extract_xml_text(&refer, "displayname") {
+        Some(name) if !name.is_empty() => Some(format!("{}: {}", name, content)),
+        _ => Some(content),
+    }
+}
+
+fn quote_content_text(raw: &str, max_chars: usize) -> Option<String> {
+    let unescaped = unescape_html(raw);
+    if unescaped.contains("<appmsg") {
+        if let Some(parsed) = parse_appmsg(&unescaped) {
+            return Some(parsed);
+        }
+    }
+    let collapsed = collapse_text(&unescaped, max_chars);
+    if collapsed.is_empty() {
+        None
+    } else {
+        Some(collapsed)
+    }
+}
+
+fn quote_refermsg_type_label(t: &str) -> Option<&'static str> {
+    match t {
+        "1" => None,
+        "3" => Some("[图片]"),
+        "34" => Some("[语音]"),
+        "43" => Some("[视频]"),
+        "47" => Some("[表情]"),
+        "49" => Some("[链接/文件]"),
+        _ => None,
+    }
+}
+
+fn collapse_text(text: &str, max_chars: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > max_chars {
+        format!("{}...", collapsed.chars().take(max_chars).collect::<String>())
+    } else {
+        collapsed
     }
 }
 
@@ -827,6 +900,201 @@ fn unescape_html(s: &str) -> String {
      .replace("&amp;", "&")
      .replace("&quot;", "\"")
      .replace("&apos;", "'")
+}
+
+#[cfg(test)]
+mod appmsg_tests {
+    use super::*;
+
+    #[test]
+    fn parse_quote_appmsg_reads_refermsg_content() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>我也没有用ai啊</title>
+    <type>57</type>
+    <content />
+    <refermsg>
+      <type>1</type>
+      <displayname>不再熬夜</displayname>
+      <content>昨天用 claude 爬小红书数据来着</content>
+    </refermsg>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    #[test]
+    fn query_messages_filters_appmsg_by_base_type() {
+        let path = temp_db_path("query_messages_filters_appmsg_by_base_type");
+        {
+            let conn = Connection::open(&path).expect("open temp db");
+            conn.execute(
+                "CREATE TABLE Msg_test (
+                    local_id INTEGER,
+                    local_type INTEGER,
+                    create_time INTEGER,
+                    real_sender_id INTEGER,
+                    message_content TEXT,
+                    WCDB_CT_message_content INTEGER
+                )",
+                [],
+            )
+            .expect("create message table");
+            conn.execute(
+                "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    1_i64,
+                    ((57_i64) << 32) | 49_i64,
+                    1775146911_i64,
+                    0_i64,
+                    r#"<msg><appmsg><title>我也没有用ai啊</title><type>57</type><content /><refermsg><displayname>不再熬夜</displayname><content>昨天用 claude 爬小红书数据来着</content></refermsg></appmsg></msg>"#,
+                    0_i64
+                ],
+            )
+            .expect("insert quote message");
+        }
+
+        let rows = query_messages(
+            &path,
+            "Msg_test",
+            "wxid_r605h38n08mv22",
+            false,
+            &HashMap::new(),
+            None,
+            None,
+            Some(49),
+            10,
+            0,
+        )
+        .expect("query messages");
+
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["content"].as_str(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    #[test]
+    fn search_in_table_filters_appmsg_by_base_type() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE Msg_test (
+                local_id INTEGER,
+                local_type INTEGER,
+                create_time INTEGER,
+                real_sender_id INTEGER,
+                message_content TEXT,
+                WCDB_CT_message_content INTEGER
+            )",
+            [],
+        )
+        .expect("create message table");
+        conn.execute(
+            "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                1_i64,
+                ((57_i64) << 32) | 49_i64,
+                1775146911_i64,
+                0_i64,
+                r#"<msg><appmsg><title>我也没有用ai啊</title><type>57</type><content /><refermsg><displayname>不再熬夜</displayname><content>昨天用 claude 爬小红书数据来着</content></refermsg></appmsg></msg>"#,
+                0_i64
+            ],
+        )
+        .expect("insert quote message");
+
+        let rows = search_in_table(
+            &conn,
+            "Msg_test",
+            "wxid_r605h38n08mv22",
+            false,
+            &HashMap::new(),
+            "claude",
+            None,
+            None,
+            Some(49),
+            10,
+        )
+        .expect("search messages");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["content"].as_str(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    #[test]
+    fn search_in_table_matches_decompressed_formatted_appmsg_content() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE Msg_test (
+                local_id INTEGER,
+                local_type INTEGER,
+                create_time INTEGER,
+                real_sender_id INTEGER,
+                message_content BLOB,
+                WCDB_CT_message_content INTEGER
+            )",
+            [],
+        )
+        .expect("create message table");
+        let xml = r#"<msg><appmsg><title>我也没有用ai啊</title><type>57</type><content /><refermsg><displayname>不再熬夜</displayname><content>昨天用 claude 爬小红书数据来着</content></refermsg></appmsg></msg>"#;
+        let compressed = zstd::encode_all(xml.as_bytes(), 0).expect("compress appmsg xml");
+        conn.execute(
+            "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                1_i64,
+                ((57_i64) << 32) | 49_i64,
+                1775146911_i64,
+                0_i64,
+                compressed,
+                4_i64
+            ],
+        )
+        .expect("insert compressed quote message");
+
+        let rows = search_in_table(
+            &conn,
+            "Msg_test",
+            "wxid_r605h38n08mv22",
+            false,
+            &HashMap::new(),
+            "claude",
+            None,
+            None,
+            Some(49),
+            10,
+        )
+        .expect("search messages");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["content"].as_str(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "wx-cli-{}-{}-{}.db",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before unix epoch")
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
 }
 
 fn fmt_time(ts: i64, fmt: &str) -> String {
