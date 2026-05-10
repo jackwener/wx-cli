@@ -65,6 +65,16 @@ codesign --remove-signature "/Applications/WeChat.app/Contents/Frameworks/vlc_pl
 codesign --force --deep --sign - /Applications/WeChat.app
 ```
 
+重签名会改变 WeChat.app 的 code signature。若微信截图提示需要开启录屏权限，即使系统设置里看起来已经允许，也要重新生成 Screen Recording / 录屏与系统录音授权：
+
+```bash
+tccutil reset ScreenCapture com.tencent.xinWeChat
+killall tccd 2>/dev/null || true
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+```
+
+然后在 **隐私与安全性 → 录屏与系统录音** 的上半区添加 `/Applications/WeChat.app` 并开启；在 macOS 26 上，下半区 **仅系统录音** 不足以修复微信截图。
+
 **第二步：重启 WeChat**
 
 ```bash

@@ -112,6 +112,8 @@ sudo wx init
 > codesign --remove-signature "/Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib"
 > codesign --force --deep --sign - /Applications/WeChat.app
 > ```
+>
+> 重签名后，macOS 的部分隐私权限会按新的 code signature 重新校验。如果微信截图提示需要开启录屏权限，即使系统设置里看起来已经允许，也需要重新添加微信到 **Screen Recording / 录屏与系统录音**。见 [macOS 权限与签名指南](docs/macos-permission-guide.md#五重签名后微信截图提示开启录屏权限)。
 
 **Linux**
 

@@ -196,3 +196,73 @@ open /Applications/WeChat.app
 | "SIP 阻止了调试微信" | ❌ SIP 只保护系统进程，微信不受 SIP 保护 |
 | "加了 sshd 到 FDA 就行" | ❌ 还需要加 `sshd-keygen-wrapper`，且要重连 SSH |
 | "微信开着也能重签名" | ❌ 运行中的 binary/dylib 被占用，codesign 会失败 |
+
+---
+
+## 五、重签名后微信截图提示开启录屏权限
+
+### 现象
+
+完成 ad-hoc 重签名和 `wx init` 后，微信自带截图功能可能提示需要开启录屏权限；但系统设置里看起来已经允许了微信。
+
+常见触发条件：
+
+- macOS 上执行过 `codesign --force --deep --sign - /Applications/WeChat.app`
+- 微信随后重新启动并登录
+- 使用微信截图时提示缺少录屏权限
+
+### 原因
+
+macOS 的 TCC 隐私权限不只按 bundle id 识别应用，也会保存应用的 code requirement / code signature 信息。微信从官方签名变成 ad-hoc 签名后，旧的 Screen Recording 授权记录可能不再匹配当前的 WeChat.app。
+
+这时系统设置里可能仍能看到“微信.app”开关，但实际截图权限已经失效，需要按当前签名重新生成授权记录。
+
+### 修复步骤
+
+先重置微信的 Screen Recording 授权：
+
+```bash
+tccutil reset ScreenCapture com.tencent.xinWeChat
+killall tccd 2>/dev/null || true
+open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+```
+
+然后在 GUI 中重新添加微信：
+
+1. 打开 **隐私与安全性 → 录屏与系统录音**。
+2. 在上半区 **录屏与系统录音** 点击 `+`。
+3. 选择 `/Applications/WeChat.app`。
+4. 确认开关为开启。
+5. 选择“退出并重新打开”，或手动退出并重新打开微信。
+
+注意：在 macOS 26 上，相关设置可能显示为两块：
+
+| 区域 | 作用 |
+|------|------|
+| **录屏与系统录音** | 允许应用录制屏幕内容和系统音频；微信截图需要这一项 |
+| **仅系统录音** | 只允许录制系统音频；只打开这一项不能修复微信截图 |
+
+### 验证
+
+检查当前 WeChat.app 是否已被 ad-hoc 签名：
+
+```bash
+codesign -dv --verbose=4 /Applications/WeChat.app 2>&1 | grep -E "Signature|flags|TeamIdentifier"
+```
+
+期望能看到类似：
+
+```text
+flags=0x2(adhoc)
+Signature=adhoc
+TeamIdentifier=not set
+```
+
+检查系统 TCC 记录中是否已有微信的 Screen Recording 授权：
+
+```bash
+sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+  "select service,client,auth_value,length(csreq) from access where service='kTCCServiceScreenCapture' and client='com.tencent.xinWeChat';"
+```
+
+其中 `auth_value=2` 表示允许。`csreq` 长度有值表示系统已为当前应用身份保存 code requirement。
