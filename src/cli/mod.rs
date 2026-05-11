@@ -235,6 +235,9 @@ enum Commands {
         /// 结束时间 YYYY-MM-DD
         #[arg(long)]
         until: Option<String>,
+        /// 只看有未读的公众号，每个公众号取最新 1 篇
+        #[arg(long)]
+        unread: bool,
         /// 输出 JSON（默认 YAML）
         #[arg(long)]
         json: bool,
@@ -323,8 +326,8 @@ fn dispatch(cli: Cli) -> Result<()> {
         Commands::SnsSearch { keyword, limit, since, until, user, json } => {
             sns_search::cmd_sns_search(keyword, limit, since, until, user, json)
         }
-        Commands::BizArticles { limit, account, since, until, json } => {
-            biz_articles::cmd_biz_articles(limit, account, since, until, json)
+        Commands::BizArticles { limit, account, since, until, unread, json } => {
+            biz_articles::cmd_biz_articles(limit, account, since, until, unread, json)
         }
         Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd),
     }

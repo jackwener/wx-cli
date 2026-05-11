@@ -9,6 +9,7 @@ pub fn cmd_biz_articles(
     account: Option<String>,
     since: Option<String>,
     until: Option<String>,
+    unread: bool,
     json: bool,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
@@ -19,6 +20,7 @@ pub fn cmd_biz_articles(
         account,
         since: since_ts,
         until: until_ts,
+        unread,
     };
     let resp = transport::send(req)?;
     let data = resp.data.get("articles")

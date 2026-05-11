@@ -3046,10 +3046,40 @@ pub async fn q_biz_articles(
     account: Option<String>,
     since: Option<i64>,
     until: Option<i64>,
+    unread: bool,
 ) -> Result<Value> {
     let biz_path = db.get("message/biz_message_0.db").await?
         .context("无法解密 biz_message_0.db，请确认 all_keys.json 包含对应密鑰")?
 ;
+
+    // 开启 --unread：从 session.db 拿“公众号 + unread_count>0”的 username 子集，
+    // 作为合集过滤（与 --account 取交集），后续结果按 account_username 去重取顶 1 篇。
+    let unread_usernames: Option<std::collections::HashSet<String>> = if unread {
+        let session_path = db.get("session/session.db").await?
+            .context("无法解密 session.db")?;
+        let session_path2 = session_path.clone();
+        let unread_rows: Vec<String> = tokio::task::spawn_blocking(move || {
+            let conn = Connection::open(&session_path2)?;
+            let mut stmt = conn.prepare(
+                "SELECT username FROM SessionTable WHERE unread_count > 0"
+            )?;
+            let rows: Vec<String> = stmt.query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok::<_, anyhow::Error>(rows)
+        }).await??;
+        // 仅保留公众号类型的未读会话
+        let set: std::collections::HashSet<String> = unread_rows.into_iter()
+            .filter(|u| chat_type_of(u, names) == "official_account")
+            .collect();
+        if set.is_empty() {
+            // 没有未读公众号 → 直接空返回，避免打 biz 表扫描
+            return Ok(json!({ "count": 0, "articles": [] }));
+        }
+        Some(set)
+    } else {
+        None
+    };
 
     // 1. 从 Name2Id 表获取 rowid -> username 映射，再推导 md5 -> username
     let biz_path2 = biz_path.clone();
@@ -3071,7 +3101,7 @@ pub async fn q_biz_articles(
 
     // 2. 如果 指定了 --account，找到匹配的 username 列表
     let account_low = account.as_deref().map(|s| s.to_lowercase());
-    let target_usernames: Option<Vec<String>> = account_low.as_ref().map(|low| {
+    let mut target_usernames: Option<Vec<String>> = account_low.as_ref().map(|low| {
         id2username.values()
             .filter(|u| {
                 let display = names.display(u);
@@ -3081,6 +3111,20 @@ pub async fn q_biz_articles(
             .cloned()
             .collect()
     });
+
+    // --unread 与 --account 取交集（进一步缩小范围）
+    if let Some(ref unread_set) = unread_usernames {
+        target_usernames = Some(match target_usernames.take() {
+            Some(acc_list) => acc_list.into_iter()
+                .filter(|u| unread_set.contains(u))
+                .collect(),
+            None => unread_set.iter().cloned().collect(),
+        });
+        // 交集为空 → 提前返回
+        if target_usernames.as_ref().map(|v| v.is_empty()).unwrap_or(false) {
+            return Ok(json!({ "count": 0, "articles": [] }));
+        }
+    }
 
     // 3. 进行数据库查询
     let biz_path3 = biz_path.clone();
@@ -3167,8 +3211,15 @@ pub async fn q_biz_articles(
         articles.extend(items);
     }
 
-    // 5. 按 pub_time DESC 排序，取前 N 条
+    // 5. 按 pub_time DESC 排序
     articles.sort_by_key(|a| std::cmp::Reverse(a.pub_time));
+
+    // --unread 语义 A：每个公众号只保留最新 1 篇（已按 pub_time 排序，取首条即可）
+    if unread {
+        let mut seen = std::collections::HashSet::<String>::new();
+        articles.retain(|a| seen.insert(a.account_username.clone()));
+    }
+
     articles.truncate(limit);
 
     let results: Vec<Value> = articles.into_iter().map(|a| {

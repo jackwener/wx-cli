@@ -113,6 +113,9 @@ pub enum Request {
         since: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         until: Option<i64>,
+        /// 只看有未读消息的公众号，每个公众号取最新 1 篇
+        #[serde(default)]
+        unread: bool,
     },
     /// 朋友圈全文搜索（匹配 contentDesc）
     SnsSearch {

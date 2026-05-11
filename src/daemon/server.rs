@@ -234,8 +234,8 @@ async fn dispatch(
         ReloadConfig => {
             Response::ok(serde_json::json!({ "reloading": true }))
         }
-        BizArticles { limit, account, since, until } => {
-            match query::q_biz_articles(db, &names_arc, limit, account, since, until).await {
+        BizArticles { limit, account, since, until, unread } => {
+            match query::q_biz_articles(db, &names_arc, limit, account, since, until, unread).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
