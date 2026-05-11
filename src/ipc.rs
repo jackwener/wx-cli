@@ -102,6 +102,18 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         user: Option<String>,
     },
+    /// 查询公众号文章推送（biz_message_0.db）
+    BizArticles {
+        #[serde(default = "default_limit_50")]
+        limit: usize,
+        /// 公众号名称过滤（模糊匹配 display name，None = 全部）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+    },
     /// 朋友圈全文搜索（匹配 contentDesc）
     SnsSearch {
         keyword: String,

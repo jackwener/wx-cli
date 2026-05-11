@@ -2945,6 +2945,346 @@ pub async fn q_sns_search(
     Ok(json!({ "keyword": keyword, "posts": posts, "total": total }))
 }
 
+// ─── 公众号文章查询 ───────────────────────────────────────────────────────────
+
+/// 一条公众号文章的解析产物
+#[derive(Debug)]
+struct BizArticle {
+    /// 接收该推送的时间戳（即消息的 create_time）
+    recv_time: i64,
+    /// 公众号 username
+    account_username: String,
+    /// 文章标题
+    title: String,
+    /// 文章链接
+    url: String,
+    /// 摘要
+    digest: String,
+    /// 封面图
+    cover: String,
+    /// 文章发布时间（pub_time，单位秒）
+    pub_time: i64,
+}
+
+/// 从 biz_message 表的单条 XML 解析出全部 article items
+fn parse_biz_xml_items(recv_time: i64, account_username: &str, xml: &str) -> Vec<BizArticle> {
+    let mut items = Vec::new();
+    let mut search_from = 0;
+    loop {
+        let Some(item_start) = xml[search_from..].find("<item>") else { break; };
+        let abs_start = search_from + item_start;
+        let Some(item_end) = xml[abs_start..].find("</item>") else { break; };
+        let abs_end = abs_start + item_end + 7;
+        let item_xml = &xml[abs_start..abs_end];
+
+        let title = extract_cdata(item_xml, "title").unwrap_or_default();
+        let url = extract_cdata(item_xml, "url").unwrap_or_default();
+        // Skip items with no URL or empty title (e.g. payment entries)
+        if url.is_empty() || title.is_empty() {
+            search_from = abs_end;
+            continue;
+        }
+        let digest = extract_cdata(item_xml, "digest").unwrap_or_default();
+        let cover = extract_cdata(item_xml, "cover").unwrap_or_default();
+        let pub_time = extract_xml_text(item_xml, "pub_time")
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(recv_time);
+
+        items.push(BizArticle {
+            recv_time,
+            account_username: account_username.to_string(),
+            title,
+            url,
+            digest,
+            cover,
+            pub_time,
+        });
+        search_from = abs_end;
+    }
+    items
+}
+
+/// 提取 CDATA 或普通文本内容： `<tag><![CDATA[...]]></tag>` 或 `<tag>...</tag>`
+///
+/// 注意: 内容匹配到 `</tag>` 之前的内容。CDATA 块中的 "]]"已在 "]]\x3e" 之前，
+/// 所以 inner 为 `<![CDATA[content]]>` 或 `<![CDATA[content]]` （如果 ">" 被 close tag 吸掉）
+fn extract_cdata(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    let start = xml.find(&open)? + open.len();
+    let end = xml[start..].find(&close)?;
+    let inner = xml[start..start + end].trim();
+    if inner.starts_with("<![CDATA[") {
+        // inner = `<![CDATA[content]]>` → strip 9-char `<![CDATA[` prefix + 3-char `]]>` suffix
+        let body = &inner[9..];
+        // Strip `]]>` (normal) or `]]` (edge case)
+        let cdata_end = b"]]>";
+        let cdata_end2 = b"]]";
+        let content: &str = if body.as_bytes().ends_with(cdata_end) {
+            &body[..body.len() - 3]
+        } else if body.as_bytes().ends_with(cdata_end2) {
+            &body[..body.len() - 2]
+        } else {
+            body
+        };
+        let content = content.trim();
+        if content.is_empty() { None } else { Some(content.to_string()) }
+    } else if inner.is_empty() {
+        None
+    } else {
+        Some(unescape_html(inner))
+    }
+}
+
+/// 查询公众号文章推送（biz_message_0.db）
+///
+/// 每条消息可能包含多篇文章（多图文推送）。返回所有文章展开就的平底列表。
+pub async fn q_biz_articles(
+    db: &DbCache,
+    names: &Names,
+    limit: usize,
+    account: Option<String>,
+    since: Option<i64>,
+    until: Option<i64>,
+) -> Result<Value> {
+    let biz_path = db.get("message/biz_message_0.db").await?
+        .context("无法解密 biz_message_0.db，请确认 all_keys.json 包含对应密鑰")?
+;
+
+    // 1. 从 Name2Id 表获取 rowid -> username 映射，再推导 md5 -> username
+    let biz_path2 = biz_path.clone();
+    let id2username: HashMap<i64, String> = tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&biz_path2)?;
+        let mut stmt = conn.prepare("SELECT rowid, user_name FROM Name2Id WHERE user_name LIKE 'gh_%'")?
+        ;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok::<_, anyhow::Error>(rows.into_iter().collect())
+    }).await??;
+
+    // 构建 md5(username) -> username 映射
+    let md5_to_uname: HashMap<String, String> = id2username.values()
+        .map(|u| (format!("{:x}", md5::compute(u.as_bytes())), u.clone()))
+        .collect();
+
+    // 2. 如果 指定了 --account，找到匹配的 username 列表
+    let account_low = account.as_deref().map(|s| s.to_lowercase());
+    let target_usernames: Option<Vec<String>> = account_low.as_ref().map(|low| {
+        id2username.values()
+            .filter(|u| {
+                let display = names.display(u);
+                display.to_lowercase().contains(low.as_str())
+                    || u.to_lowercase().contains(low.as_str())
+            })
+            .cloned()
+            .collect()
+    });
+
+    // 3. 进行数据库查询
+    let biz_path3 = biz_path.clone();
+    let since2 = since;
+    let until2 = until;
+    let target_hashes: Option<Vec<String>> = target_usernames.as_ref().map(|unames| {
+        unames.iter()
+            .map(|u| format!("{:x}", md5::compute(u.as_bytes())))
+            .collect()
+    });
+
+    let rows: Vec<(String, i64, i64, Vec<u8>, i64)> = tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&biz_path3)?;
+
+        // 列出所有 Msg_<hash> 表
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'Msg_%'"
+        )?;
+        let table_names: Vec<String> = stmt.query_map([], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let re = regex::Regex::new(r"^Msg_[0-9a-f]{32}$").unwrap();
+        let mut all_rows: Vec<(String, i64, i64, Vec<u8>, i64)> = Vec::new();
+
+        for tname in &table_names {
+            if !re.is_match(tname) { continue; }
+            let hash = &tname[4..];
+
+            // account 过滤
+            if let Some(ref hashes) = target_hashes {
+                if !hashes.iter().any(|h| h == hash) { continue; }
+            }
+
+            let username = md5_to_uname.get(hash).cloned().unwrap_or_default();
+
+            // 构建过滤条件
+            let mut clauses: Vec<String> = Vec::new();
+            let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+            // local_type & 0xFFFFFFFF = 49 是 appmsg（公众号文章）
+            clauses.push("(local_type & 4294967295) = 49".to_string());
+            if let Some(s) = since2 {
+                clauses.push("create_time >= ?".to_string());
+                params.push(Box::new(s));
+            }
+            if let Some(u) = until2 {
+                clauses.push("create_time <= ?".to_string());
+                params.push(Box::new(u));
+            }
+            let where_clause = format!("WHERE {}", clauses.join(" AND "));
+
+            let sql = format!(
+                "SELECT create_time, WCDB_CT_message_content, message_content \
+                 FROM [{}] {} ORDER BY create_time DESC",
+                tname, where_clause
+            );
+
+            let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+            if let Ok(mut inner_stmt) = conn.prepare(&sql) {
+                let msg_rows: Vec<_> = inner_stmt
+                    .query_map(params_ref.as_slice(), |row| {
+                        Ok((
+                            username.clone(),
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1).unwrap_or(0),
+                            get_content_bytes(row, 2),
+                            0i64,
+                        ))
+                    })
+                    .map(|it| it.filter_map(|r| r.ok()).collect())
+                    .unwrap_or_default();
+                all_rows.extend(msg_rows);
+            }
+        }
+        Ok::<_, anyhow::Error>(all_rows)
+    }).await??;
+
+    // 4. 解压并解析 XML
+    let mut articles: Vec<BizArticle> = Vec::new();
+    for (username, recv_time, ct, content_bytes, _) in rows {
+        let content = decompress_message(&content_bytes, ct);
+        if content.is_empty() { continue; }
+        let items = parse_biz_xml_items(recv_time, &username, &content);
+        articles.extend(items);
+    }
+
+    // 5. 按 pub_time DESC 排序，取前 N 条
+    articles.sort_by_key(|a| std::cmp::Reverse(a.pub_time));
+    articles.truncate(limit);
+
+    let results: Vec<Value> = articles.into_iter().map(|a| {
+        let account_display = names.display(&a.account_username);
+        json!({
+            "time": fmt_time(a.pub_time, "%Y-%m-%d %H:%M"),
+            "timestamp": a.pub_time,
+            "recv_time": a.recv_time,
+            "recv_time_str": fmt_time(a.recv_time, "%Y-%m-%d %H:%M"),
+            "account": account_display,
+            "account_username": a.account_username,
+            "title": a.title,
+            "url": a.url,
+            "digest": a.digest,
+            "cover_url": a.cover,
+        })
+    }).collect();
+
+    Ok(json!({ "count": results.len(), "articles": results }))
+}
+
+#[cfg(test)]
+mod biz_tests {
+    use super::*;
+
+    #[test]
+    fn extract_cdata_normal() {
+        let xml = "<title><![CDATA[TencentResearch]]></title>";
+        assert_eq!(extract_cdata(xml, "title"), Some("TencentResearch".into()));
+    }
+
+    #[test]
+    fn extract_cdata_empty() {
+        let xml = "<cover><![CDATA[]]></cover>";
+        assert_eq!(extract_cdata(xml, "cover"), None);
+    }
+
+    #[test]
+    fn extract_cdata_url() {
+        let xml = "<url><![CDATA[http://mp.weixin.qq.com/s?__biz=abc&mid=123]]></url>";
+        let result = extract_cdata(xml, "url");
+        assert!(result.is_some());
+        let url = result.unwrap();
+        assert!(url.starts_with("http://mp.weixin.qq.com"));
+        assert!(!url.contains("CDATA"));
+    }
+
+    #[test]
+    fn extract_cdata_no_cdata_wrapper() {
+        let xml = "<pub_time>1700000000</pub_time>";
+        assert_eq!(extract_cdata(xml, "pub_time"), Some("1700000000".into()));
+    }
+
+    #[test]
+    fn parse_biz_xml_items_single_article() {
+        let xml = r#"<msg><appmsg><mmreader><category><item>
+            <title><![CDATA[Test Article Title]]></title>
+            <url><![CDATA[http://mp.weixin.qq.com/s?test=1]]></url>
+            <digest><![CDATA[Test Digest]]></digest>
+            <cover><![CDATA[https://example.com/cover.jpg]]></cover>
+            <pub_time>1700000000</pub_time>
+        </item></category></mmreader></appmsg></msg>"#;
+
+        let items = parse_biz_xml_items(1699999999, "gh_test123", xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Test Article Title");
+        assert_eq!(items[0].url, "http://mp.weixin.qq.com/s?test=1");
+        assert_eq!(items[0].digest, "Test Digest");
+        assert_eq!(items[0].pub_time, 1700000000);
+        assert_eq!(items[0].account_username, "gh_test123");
+    }
+
+    #[test]
+    fn parse_biz_xml_items_skips_no_url() {
+        let xml = r#"<msg><mmreader><category><item>
+            <title><![CDATA[Has Title No URL]]></title>
+            <url><![CDATA[]]></url>
+            <pub_time>1700000001</pub_time>
+        </item></category></mmreader></msg>"#;
+        let items = parse_biz_xml_items(1700000001, "gh_test", xml);
+        assert_eq!(items.len(), 0);
+    }
+
+    #[test]
+    fn parse_biz_xml_items_multi_article() {
+        let xml = r#"<msg><mmreader><category>
+        <item>
+            <title><![CDATA[Article 1]]></title>
+            <url><![CDATA[http://mp.weixin.qq.com/s?a=1]]></url>
+            <pub_time>1700000010</pub_time>
+        </item>
+        <item>
+            <title><![CDATA[Article 2]]></title>
+            <url><![CDATA[http://mp.weixin.qq.com/s?a=2]]></url>
+            <pub_time>1700000020</pub_time>
+        </item>
+        </category></mmreader></msg>"#;
+        let items = parse_biz_xml_items(1700000000, "gh_multi", xml);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].title, "Article 1");
+        assert_eq!(items[1].title, "Article 2");
+    }
+
+    #[test]
+    fn parse_biz_xml_items_pub_time_fallback() {
+        // When pub_time is missing, should fall back to recv_time
+        let xml = r#"<item>
+            <title><![CDATA[No PubTime]]></title>
+            <url><![CDATA[http://mp.weixin.qq.com/s?x=1]]></url>
+        </item>"#;
+        let items = parse_biz_xml_items(1700000099, "gh_fallback", xml);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].pub_time, 1700000099); // falls back to recv_time
+    }
+}
+
 #[cfg(test)]
 mod group_nickname_tests {
     use super::*;

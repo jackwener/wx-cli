@@ -1,4 +1,5 @@
 mod init;
+pub mod biz_articles;
 pub mod sessions;
 pub mod history;
 pub mod search;
@@ -220,6 +221,24 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// 查询公众号文章推送（本地缓存）
+    BizArticles {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// 限定公众号（名称模糊匹配）
+        #[arg(long)]
+        account: Option<String>,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
     /// 朋友圈全文搜索：匹配正文关键词
     SnsSearch {
         /// 关键词
@@ -303,6 +322,9 @@ fn dispatch(cli: Cli) -> Result<()> {
         }
         Commands::SnsSearch { keyword, limit, since, until, user, json } => {
             sns_search::cmd_sns_search(keyword, limit, since, until, user, json)
+        }
+        Commands::BizArticles { limit, account, since, until, json } => {
+            biz_articles::cmd_biz_articles(limit, account, since, until, json)
         }
         Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd),
     }
