@@ -35,6 +35,10 @@ wx biz-articles --account "Datawhale"
 wx biz-articles --since 2026-05-10
 wx biz-articles --since 2026-05-01 --until 2026-05-10
 
+# Show only accounts with unread messages, one latest article per account
+wx biz-articles --unread
+wx biz-articles --unread --account "Datawhale"   # combine: unread within specific account
+
 # JSON output (for downstream piping)
 wx biz-articles --json
 wx biz-articles --since 2026-05-10 --json | jq '.[].url'
@@ -65,6 +69,13 @@ Each article item includes:
 - Items without URL or title (e.g., payment notifications from service accounts) are filtered out
 - New `extract_cdata` helper function strips CDATA wrappers from XML content
 - Results sorted by `pub_time` DESC (article publish time, not message receive time)
+
+### `--unread` semantics
+
+- Queries `session.db` for `unread_count > 0` rows whose `chat_type == official_account`, intersects with `--account` filter if both provided
+- Returns at most **one latest article per account** (dedupe by `account_username` after the global pub_time DESC sort)
+- Aligns with the behavior of `wx unread --filter official` for fast "what unread accounts are there + what's the latest title" scanning
+- Empty intersection short-circuits before scanning biz tables
 
 ## Changes
 
