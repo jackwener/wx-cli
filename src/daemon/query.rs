@@ -481,7 +481,7 @@ fn query_messages(
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?");
+        clauses.push("(local_type & 4294967295) = ?");
         params.push(Box::new(t));
     }
     let where_clause = if clauses.is_empty() {
@@ -521,14 +521,16 @@ fn query_messages(
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
         let text = fmt_content(local_id, local_type, &content, is_group);
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
             "local_id": local_id,
-        }));
+        });
+        add_appmsg_meta(&mut msg, local_type, &content, is_group);
+        result.push(msg);
     }
     Ok(result)
 }
@@ -548,8 +550,21 @@ fn search_in_table(
     let id2u = load_id2u(conn);
     // 转义 LIKE 通配符，使用 '\' 作为 ESCAPE 字符
     let escaped_kw = keyword.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    let mut clauses = vec!["message_content LIKE ? ESCAPE '\\'".to_string()];
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(format!("%{}%", escaped_kw))];
+    let search_decoded_content = msg_type == Some(49);
+    let include_decoded_links = msg_type.is_none();
+    let filter_formatted_content = search_decoded_content || include_decoded_links;
+    let keyword_lower = keyword.to_lowercase();
+    let mut clauses = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if include_decoded_links {
+        clauses.push(
+            "(message_content LIKE ? ESCAPE '\\' OR (local_type & 4294967295) = 49)".to_string(),
+        );
+        params.push(Box::new(format!("%{}%", escaped_kw)));
+    } else if !search_decoded_content {
+        clauses.push("message_content LIKE ? ESCAPE '\\'".to_string());
+        params.push(Box::new(format!("%{}%", escaped_kw)));
+    }
     if let Some(s) = since {
         clauses.push("create_time >= ?".into());
         params.push(Box::new(s));
@@ -559,17 +574,28 @@ fn search_in_table(
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?".into());
+        clauses.push("(local_type & 4294967295) = ?".into());
         params.push(Box::new(t));
     }
-    let where_clause = format!("WHERE {}", clauses.join(" AND "));
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", clauses.join(" AND "))
+    };
+    let limit_clause = if filter_formatted_content {
+        ""
+    } else {
+        " LIMIT ?"
+    };
     let sql = format!(
         "SELECT local_id, local_type, create_time, real_sender_id,
                 message_content, WCDB_CT_message_content
-         FROM [{}] {} ORDER BY create_time DESC LIMIT ?",
-        table, where_clause
+         FROM [{}] {} ORDER BY create_time DESC{}",
+        table, where_clause, limit_clause
     );
-    params.push(Box::new(limit as i64));
+    if !filter_formatted_content {
+        params.push(Box::new(limit as i64));
+    }
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
@@ -591,17 +617,48 @@ fn search_in_table(
         let content = decompress_message(&content_bytes, ct);
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
         let text = fmt_content(local_id, local_type, &content, is_group);
+        if filter_formatted_content
+            && !matches_search_text(&content, &text, keyword, &keyword_lower)
+        {
+            continue;
+        }
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "chat": "",
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
-        }));
+        });
+        add_appmsg_meta(&mut msg, local_type, &content, is_group);
+        result.push(msg);
+        if filter_formatted_content && result.len() >= limit {
+            break;
+        }
     }
     Ok(result)
+}
+
+fn add_appmsg_meta(msg: &mut Value, local_type: i64, content: &str, is_group: bool) {
+    let base = (local_type as u64 & 0xFFFFFFFF) as i64;
+    if base != 49 {
+        return;
+    }
+    let text = message_body(content, is_group);
+    let Some(meta) = parse_appmsg_meta(text) else {
+        return;
+    };
+    if let Some(obj) = msg.as_object_mut() {
+        obj.insert("appmsg".into(), meta);
+    }
+}
+
+fn matches_search_text(raw: &str, formatted: &str, keyword: &str, keyword_lower: &str) -> bool {
+    raw.contains(keyword)
+        || formatted.contains(keyword)
+        || (!keyword_lower.is_empty() && raw.to_lowercase().contains(keyword_lower))
+        || (!keyword_lower.is_empty() && formatted.to_lowercase().contains(keyword_lower))
 }
 
 fn load_id2u(conn: &Connection) -> HashMap<i64, String> {
@@ -716,11 +773,7 @@ fn fmt_content(local_id: i64, local_type: i64, content: &str, is_group: bool) ->
         _ => {}
     }
 
-    let text = if is_group && content.contains(":\n") {
-        content.splitn(2, ":\n").nth(1).unwrap_or(content)
-    } else {
-        content
-    };
+    let text = message_body(content, is_group);
 
     if base == 49 && text.contains("<appmsg") {
         if let Some(parsed) = parse_appmsg(text) {
@@ -728,6 +781,14 @@ fn fmt_content(local_id: i64, local_type: i64, content: &str, is_group: bool) ->
         }
     }
     text.to_string()
+}
+
+fn message_body(content: &str, is_group: bool) -> &str {
+    if is_group && content.contains(":\n") {
+        content.splitn(2, ":\n").nth(1).unwrap_or(content)
+    } else {
+        content
+    }
 }
 
 /// 解析撤回消息 XML，提取被撤回的内容摘要
@@ -767,6 +828,7 @@ fn parse_appmsg(text: &str) -> Option<String> {
     let title = extract_xml_text(text, "title")?;
     let atype = extract_xml_text(text, "type").unwrap_or_default();
     match atype.as_str() {
+        "5" => Some(format_article_appmsg(text, &title)),
         "6" => Some(if !title.is_empty() { format!("[文件] {}", title) } else { "[文件]".into() }),
         "57" => {
             let ref_content = extract_xml_text(text, "content")
@@ -797,6 +859,103 @@ fn parse_appmsg(text: &str) -> Option<String> {
     }
 }
 
+fn parse_appmsg_meta(text: &str) -> Option<Value> {
+    let atype = extract_xml_text(text, "type").unwrap_or_default();
+    if atype != "5" {
+        return None;
+    }
+    let meta = article_meta_from_xml(text)?;
+    Some(article_meta_to_value(meta))
+}
+
+#[derive(Debug)]
+struct ArticleAppmsgMeta {
+    title: String,
+    description: Option<String>,
+    url: Option<String>,
+    source_username: Option<String>,
+    source_display_name: Option<String>,
+    thumb_url: Option<String>,
+    thumb_md5: Option<String>,
+}
+
+fn article_meta_from_xml(text: &str) -> Option<ArticleAppmsgMeta> {
+    Some(ArticleAppmsgMeta {
+        title: extract_xml_text_decoded(text, "title")?,
+        description: extract_xml_text_decoded(text, "des"),
+        url: extract_xml_text_decoded(text, "url")
+            .or_else(|| extract_xml_text_decoded(text, "lowurl")),
+        source_username: extract_xml_text_decoded(text, "sourceusername"),
+        source_display_name: extract_xml_text_decoded(text, "sourcedisplayname"),
+        thumb_url: extract_xml_text_decoded(text, "thumburl")
+            .or_else(|| extract_xml_text_decoded(text, "cdnthumburl")),
+        thumb_md5: extract_xml_text_decoded(text, "md5")
+            .or_else(|| extract_xml_text_decoded(text, "cdnthumbmd5")),
+    })
+}
+
+fn article_meta_to_value(meta: ArticleAppmsgMeta) -> Value {
+    let mut out = serde_json::Map::new();
+    out.insert("kind".into(), Value::String("article".into()));
+    insert_json_string(&mut out, "title", Some(meta.title));
+    insert_json_string(&mut out, "description", meta.description);
+    insert_json_string(&mut out, "url", meta.url);
+    insert_json_string(&mut out, "source_username", meta.source_username);
+    insert_json_string(&mut out, "source_display_name", meta.source_display_name);
+    insert_json_string(&mut out, "thumb_url", meta.thumb_url);
+    insert_json_string(&mut out, "thumb_md5", meta.thumb_md5);
+    Value::Object(out)
+}
+
+fn insert_json_string(out: &mut serde_json::Map<String, Value>, key: &str, value: Option<String>) {
+    if let Some(value) = value.filter(|value| !value.is_empty()) {
+        out.insert(key.to_string(), Value::String(value));
+    }
+}
+
+fn format_article_appmsg(text: &str, title: &str) -> String {
+    let meta = article_meta_from_xml(text).unwrap_or_else(|| ArticleAppmsgMeta {
+        title: title.to_string(),
+        description: None,
+        url: None,
+        source_username: None,
+        source_display_name: None,
+        thumb_url: None,
+        thumb_md5: None,
+    });
+    format_article_meta(meta)
+}
+
+fn format_article_meta(meta: ArticleAppmsgMeta) -> String {
+    let mut lines = vec![if meta.title.is_empty() {
+        "[链接]".to_string()
+    } else {
+        format!("[链接] {}", meta.title)
+    }];
+    if let Some(source) = meta.source_display_name.filter(|value| !value.is_empty()) {
+        lines.push(format!("  来源: {}", source));
+    }
+    if let Some(description) = meta.description.filter(|value| !value.is_empty()) {
+        lines.push(format!("  摘要: {}", collapse_text(&description, 120)));
+    }
+    if let Some(url) = meta.url.filter(|value| !value.is_empty()) {
+        lines.push(format!("  URL: {}", url));
+    }
+    lines.join("\n")
+}
+
+fn collapse_text(text: &str, max_chars: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > max_chars {
+        format!(
+            "{}...",
+            collapsed.chars().take(max_chars).collect::<String>()
+        )
+    } else {
+        collapsed
+    }
+}
+
 fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
     let open = format!("<{}>", tag);
     let close = format!("</{}>", tag);
@@ -804,6 +963,10 @@ fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
     let content_start = start + open.len();
     let end = xml[content_start..].find(&close)?;
     Some(xml[content_start..content_start + end].trim().to_string())
+}
+
+fn extract_xml_text_decoded(xml: &str, tag: &str) -> Option<String> {
+    extract_xml_text(xml, tag).map(|value| unescape_html(&value))
 }
 
 fn extract_xml_attr(xml: &str, tag: &str, attr: &str) -> Option<String> {
@@ -827,6 +990,159 @@ fn unescape_html(s: &str) -> String {
      .replace("&amp;", "&")
      .replace("&quot;", "\"")
      .replace("&apos;", "'")
+}
+
+#[cfg(test)]
+mod appmsg_tests {
+    use super::*;
+
+    fn article_xml() -> String {
+        r#"<msg>
+  <appmsg appid="" sdkver="0">
+    <title>候鸟300科技元年｜招募进行中</title>
+    <des>候鸟+科技=∞</des>
+    <type>5</type>
+    <url>https://mp.weixin.qq.com/s?__biz=MzkyNzY3Njc2MA==&amp;mid=2247501005#rd</url>
+    <sourceusername>gh_89661c64c3d1</sourceusername>
+    <sourcedisplayname>候鸟300</sourcedisplayname>
+    <appattach>
+      <cdnthumburl>thumb-cdn-token</cdnthumburl>
+      <cdnthumbmd5>thumb-md5</cdnthumbmd5>
+    </appattach>
+  </appmsg>
+</msg>"#
+            .to_string()
+    }
+
+    #[test]
+    fn parse_public_article_appmsg_includes_url_and_source() {
+        let xml = article_xml();
+
+        assert_eq!(
+            parse_appmsg(&xml).as_deref(),
+            Some("[链接] 候鸟300科技元年｜招募进行中\n  来源: 候鸟300\n  摘要: 候鸟+科技=∞\n  URL: https://mp.weixin.qq.com/s?__biz=MzkyNzY3Njc2MA==&mid=2247501005#rd")
+        );
+
+        let article = parse_appmsg_meta(&xml).expect("article appmsg meta");
+        assert_eq!(article["kind"].as_str(), Some("article"));
+        assert_eq!(article["title"].as_str(), Some("候鸟300科技元年｜招募进行中"));
+        assert_eq!(article["description"].as_str(), Some("候鸟+科技=∞"));
+        assert_eq!(
+            article["url"].as_str(),
+            Some("https://mp.weixin.qq.com/s?__biz=MzkyNzY3Njc2MA==&mid=2247501005#rd")
+        );
+        assert_eq!(article["source_display_name"].as_str(), Some("候鸟300"));
+        assert_eq!(article["source_username"].as_str(), Some("gh_89661c64c3d1"));
+        assert_eq!(article["thumb_url"].as_str(), Some("thumb-cdn-token"));
+        assert_eq!(article["thumb_md5"].as_str(), Some("thumb-md5"));
+    }
+
+    #[test]
+    fn query_messages_attaches_article_appmsg_metadata() {
+        let path = temp_db_path("query_messages_attaches_article_appmsg_metadata");
+        {
+            let conn = Connection::open(&path).expect("open temp db");
+            create_msg_table(&conn);
+            conn.execute(
+                "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    1_i64,
+                    ((5_i64) << 32) | 49_i64,
+                    1778384179_i64,
+                    0_i64,
+                    article_xml(),
+                    0_i64
+                ],
+            )
+            .expect("insert article message");
+        }
+
+        let rows = query_messages(
+            &path,
+            "Msg_test",
+            "45821430976@chatroom",
+            true,
+            &HashMap::new(),
+            None,
+            None,
+            Some(49),
+            10,
+            0,
+        )
+        .expect("query article messages");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0]["content"]
+            .as_str()
+            .expect("content")
+            .contains("https://mp.weixin.qq.com/s?__biz=MzkyNzY3Njc2MA=="));
+        assert_eq!(rows[0]["appmsg"]["kind"].as_str(), Some("article"));
+        assert_eq!(rows[0]["appmsg"]["source_display_name"].as_str(), Some("候鸟300"));
+    }
+
+    #[test]
+    fn search_in_table_matches_compressed_article_appmsg_content() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        create_msg_table(&conn);
+        let compressed = zstd::encode_all(article_xml().as_bytes(), 0)
+            .expect("compress article appmsg xml");
+        conn.execute(
+            "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                1_i64,
+                ((5_i64) << 32) | 49_i64,
+                1778384179_i64,
+                0_i64,
+                compressed,
+                4_i64
+            ],
+        )
+        .expect("insert compressed article message");
+
+        let rows = search_in_table(
+            &conn,
+            "Msg_test",
+            "45821430976@chatroom",
+            true,
+            &HashMap::new(),
+            "候鸟300",
+            None,
+            None,
+            None,
+            10,
+        )
+        .expect("search article messages");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["appmsg"]["kind"].as_str(), Some("article"));
+        assert!(rows[0]["content"]
+            .as_str()
+            .expect("content")
+            .contains("URL: https://mp.weixin.qq.com/s?"));
+    }
+
+    fn create_msg_table(conn: &Connection) {
+        conn.execute(
+            "CREATE TABLE Msg_test (
+                local_id INTEGER,
+                local_type INTEGER,
+                create_time INTEGER,
+                real_sender_id INTEGER,
+                message_content BLOB,
+                WCDB_CT_message_content INTEGER
+            )",
+            [],
+        )
+        .expect("create message table");
+    }
+
+    fn temp_db_path(label: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("wx-cli-{}-{}.db", label, std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
 }
 
 fn fmt_time(ts: i64, fmt: &str) -> String {
