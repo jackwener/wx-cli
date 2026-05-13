@@ -262,6 +262,12 @@ pub enum DaemonCommands {
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
     },
+    /// 启动 daemon
+    Start {
+        /// 同时监听 TCP 地址（如 127.0.0.1:9876）
+        #[arg(long)]
+        tcp: Option<String>,
+    },
 }
 
 pub fn run() {

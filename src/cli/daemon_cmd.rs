@@ -8,6 +8,7 @@ pub fn cmd_daemon(cmd: DaemonCommands) -> Result<()> {
         DaemonCommands::Status => cmd_status(),
         DaemonCommands::Stop => cmd_stop(),
         DaemonCommands::Logs { follow, lines } => cmd_logs(follow, lines),
+        DaemonCommands::Start { tcp } => crate::daemon::run_start(tcp),
     }
 }
 

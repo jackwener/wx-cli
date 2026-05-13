@@ -13,13 +13,48 @@ use crate::config;
 /// 当 WX_DAEMON_MODE 环境变量设置时，main() 调用此函数
 pub fn run() {
     let rt = tokio::runtime::Runtime::new().expect("无法创建 tokio runtime");
-    if let Err(e) = rt.block_on(async_run()) {
+    if let Err(e) = rt.block_on(start_daemon(None)) {
         eprintln!("[daemon] 启动失败: {}", e);
         std::process::exit(1);
     }
 }
 
-async fn async_run() -> Result<()> {
+/// 从 CLI `wx daemon start [--tcp ADDR]` 调用
+///
+/// 查找当前可执行文件路径，设置 WX_DAEMON_MODE=1，后台启动新进程。
+pub fn run_start(tcp_addr: Option<String>) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let log = config::log_path();
+
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.env("WX_DAEMON_MODE", "1");
+    if let Some(addr) = &tcp_addr {
+        cmd.env("WX_DAEMON_TCP_ADDR", addr);
+    }
+    // 日志重定向
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)?;
+    cmd.stdout(log_file.try_clone()?).stderr(log_file);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe { cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        }) };
+    }
+
+    let child = cmd.spawn()?;
+    let pid = child.id();
+    eprintln!("[daemon] 已启动 daemon 进程 (PID {})", pid);
+    Ok(())
+}
+
+/// daemon 核心启动逻辑（被 run() 和 WX_DAEMON_MODE 路径共享）
+pub async fn start_daemon(tcp_addr: Option<String>) -> Result<()> {
     // 确保工作目录存在
     let cli_dir = config::cli_dir();
     tokio::fs::create_dir_all(&cli_dir).await?;
@@ -76,13 +111,21 @@ async fn async_run() -> Result<()> {
     let _ = db.get("sns/sns.db").await;
     eprintln!("[daemon] 预热完成，联系人 {} 个", names.map.len());
 
-    // 包一层内部 Arc：IPC 请求取 guard 后只做 Arc::clone（O(1)），
-    // 避免每次请求都全量 clone 几千个联系人的 HashMap。
-    // 用 tokio::sync::RwLock 允许 guard 跨 await（当前不跨，为未来 reload 留余地）。
+    // 包一层内部 Arc
     let names_arc = Arc::new(tokio::sync::RwLock::new(Arc::new(names)));
 
+    // 检查环境变量中的 TCP 地址（WX_DAEMON_MODE 路径下通过 env 传入）
+    let effective_tcp_addr = tcp_addr.or_else(|| std::env::var("WX_DAEMON_TCP_ADDR").ok());
+
     // 启动 IPC server（阻塞）
-    server::serve(Arc::clone(&db), Arc::clone(&names_arc)).await?;
+    server::serve(Arc::clone(&db), Arc::clone(&names_arc), effective_tcp_addr.as_deref()).await?;
+
+    // 正常退出时清理（signal 路径下由 cleanup_and_exit 处理，不会走到这里）
+    #[allow(unreachable_code)]
+    {
+        let _ = std::fs::remove_file(config::sock_path());
+        let _ = std::fs::remove_file(config::pid_path());
+    }
 
     Ok(())
 }
@@ -132,7 +175,9 @@ async fn setup_signal_handler() {
     });
 }
 
+#[cfg(unix)]
 fn cleanup_and_exit() {
+    // 仅清理 local socket 文件，TCP 端口由 OS 自动回收
     let _ = std::fs::remove_file(config::sock_path());
     let _ = std::fs::remove_file(config::pid_path());
     std::process::exit(0);
