@@ -23,21 +23,15 @@ pub fn run() {
 /// 从 CLI `wx daemon start [--tcp ADDR]` 调用
 ///
 /// 查找当前可执行文件路径，设置 WX_DAEMON_MODE=1，后台启动新进程。
+/// tracing 已在子进程 main() 中直接写入 daemon.log，无需重定向 stdout/stderr。
 pub fn run_start(tcp_addr: Option<String>) -> Result<()> {
     let exe = std::env::current_exe()?;
-    let log = config::log_path();
 
     let mut cmd = std::process::Command::new(&exe);
     cmd.env("WX_DAEMON_MODE", "1");
     if let Some(addr) = &tcp_addr {
         cmd.env("WX_DAEMON_TCP_ADDR", addr);
     }
-    // 日志重定向
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log)?;
-    cmd.stdout(log_file.try_clone()?).stderr(log_file);
 
     #[cfg(unix)]
     {
@@ -88,7 +82,7 @@ pub async fn start_daemon(tcp_addr: Option<String>) -> Result<()> {
     // 收集消息 DB 列表
     let msg_db_keys: Vec<String> = all_keys.keys()
         .filter(|k| {
-            let k = k.replace('\\', "/");
+            let k = k.replace('\', "/");
             k.contains("message/message_") && k.ends_with(".db")
                 && !k.contains("_fts") && !k.contains("_resource")
         })
@@ -154,7 +148,7 @@ fn extract_keys(json: &serde_json::Value) -> HashMap<String, String> {
             };
             if !enc_key.is_empty() {
                 // 统一路径分隔符
-                let rel = k.replace('\\', "/");
+                let rel = k.replace('\', "/");
                 result.insert(rel, enc_key);
             }
         }

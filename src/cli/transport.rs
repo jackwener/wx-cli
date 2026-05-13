@@ -114,6 +114,8 @@ pub fn ensure_daemon(tcp_addr: Option<&str>) -> Result<()> {
 }
 
 /// 启动 daemon 进程（自身二进制，设置 WX_DAEMON_MODE=1）
+///
+/// tracing 已在子进程 main() 中直接写入 daemon.log，无需重定向 stdout/stderr。
 fn start_daemon() -> Result<()> {
     let exe = std::env::current_exe().context("无法获取当前可执行文件路径")?;
 
@@ -124,23 +126,11 @@ fn start_daemon() -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        // 日志文件：~/.wx-cli/daemon.log
-        let log_path = config::log_path();
-        // 确保父目录存在
-        if let Some(parent) = log_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let (stdout_stdio, stderr_stdio) = std::fs::OpenOptions::new()
-            .create(true).append(true)
-            .open(&log_path)
-            .and_then(|f| f.try_clone().map(|g| (f, g)))
-            .map(|(f, g)| (std::process::Stdio::from(f), std::process::Stdio::from(g)))
-            .unwrap_or_else(|_| (std::process::Stdio::null(), std::process::Stdio::null()));
         let mut cmd = std::process::Command::new(&exe);
         cmd.env("WX_DAEMON_MODE", "1")
             .stdin(std::process::Stdio::null())
-            .stdout(stdout_stdio)
-            .stderr(stderr_stdio);
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
         // SAFETY: setsid() 在 fork 后的子进程中调用，使 daemon 脱离控制终端
         unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
         let _ = cmd.spawn().context("无法启动 daemon 进程")?;
@@ -149,50 +139,16 @@ fn start_daemon() -> Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let log_path = config::log_path();
-        if let Some(parent) = log_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let (stdout_stdio, stderr_stdio) = std::fs::OpenOptions::new()
-            .create(true).append(true)
-            .open(&log_path)
-            .and_then(|f| f.try_clone().map(|g| (f, g)))
-            .map(|(f, g)| (std::process::Stdio::from(f), std::process::Stdio::from(g)))
-            .unwrap_or_else(|_| (std::process::Stdio::null(), std::process::Stdio::null()));
         let _ = std::process::Command::new(&exe)
             .env("WX_DAEMON_MODE", "1")
             .stdin(std::process::Stdio::null())
-            .stdout(stdout_stdio)
-            .stderr(stderr_stdio)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .creation_flags(0x00000008) // DETACHED_PROCESS
             .spawn()
             .context("无法启动 daemon 进程")?;
     }
 
-    // 等待 daemon 就绪（最多 STARTUP_TIMEOUT_SECS 秒）
-    let deadline = std::time::Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
-    while std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(300));
-        if is_alive(None) {
-            return Ok(());
-        }
-    }
-
-    bail!(
-        "wx-daemon 启动超时（>{}s）\n请查看日志: {}",
-        STARTUP_TIMEOUT_SECS,
-        config::log_path().display()
-    )
-}
-
-/// 启动 daemon 前检查 `~/.wx-cli/` 可写，给出比"超时"更明确的错误。
-///
-/// 典型坑：旧版本 `sudo wx init` 把目录留成 root 属主，非 root 的 daemon
-/// 连 socket/log 都建不了，会静默失败 15s 超时。
-fn preflight_cli_dir_writable() -> Result<()> {
-    let cli_dir = config::cli_dir();
-    std::fs::create_dir_all(&cli_dir)
-        .with_context(|| format!("创建 {} 失败", cli_dir.display()))?;
 
     let probe = cli_dir.join(".daemon_probe");
     match std::fs::File::create(&probe) {
