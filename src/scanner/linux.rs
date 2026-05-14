@@ -3,7 +3,7 @@
 /// 通过 /proc/<pid>/maps 枚举内存区域，
 /// 通过 /proc/<pid>/mem 读取内存内容，
 /// 搜索 x'<64hex><32hex>' 格式的 SQLCipher 密钥
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 

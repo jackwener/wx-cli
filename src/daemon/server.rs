@@ -231,5 +231,8 @@ async fn dispatch(
                 Err(e) => Response::err(e.to_string()),
             }
         }
+        ReloadConfig => {
+            Response::ok(serde_json::json!({ "reloading": true }))
+        }
     }
 }

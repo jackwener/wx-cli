@@ -71,7 +71,8 @@ fn find_config_file() -> Result<PathBuf> {
         return Ok(cwd);
     }
     // 3. ~/.wx-cli/config.json
-    if let Some(home) = dirs::home_dir() {
+    let home = cli_home_dir();
+    if home != PathBuf::from("/tmp") {
         let p = home.join(".wx-cli").join("config.json");
         if p.exists() {
             return Ok(p);
@@ -87,9 +88,44 @@ fn find_config_file() -> Result<PathBuf> {
 }
 
 pub fn cli_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join(".wx-cli")
+    cli_home_dir().join(".wx-cli")
+}
+
+fn cli_home_dir() -> PathBuf {
+    resolve_cli_home(
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")),
+        sudo_user_home_dir(),
+    )
+}
+
+fn resolve_cli_home(default_home: PathBuf, sudo_home: Option<PathBuf>) -> PathBuf {
+    sudo_home.unwrap_or(default_home)
+}
+
+#[cfg(unix)]
+fn sudo_user_home_dir() -> Option<PathBuf> {
+    use std::ffi::{CStr, CString};
+
+    let sudo_user = std::env::var("SUDO_USER").ok()?;
+    let sudo_user = sudo_user.trim();
+    if sudo_user.is_empty() {
+        return None;
+    }
+
+    let c_user = CString::new(sudo_user).ok()?;
+    unsafe {
+        let pwd = libc::getpwnam(c_user.as_ptr());
+        if pwd.is_null() || (*pwd).pw_dir.is_null() {
+            return None;
+        }
+        let dir = CStr::from_ptr((*pwd).pw_dir).to_str().ok()?;
+        Some(PathBuf::from(dir))
+    }
+}
+
+#[cfg(not(unix))]
+fn sudo_user_home_dir() -> Option<PathBuf> {
+    None
 }
 
 pub fn sock_path() -> PathBuf {
@@ -154,17 +190,7 @@ pub fn auto_detect_db_dir() -> Option<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn detect_db_dir_impl() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
-    // 支持 sudo 环境
-    let home = if let Ok(sudo_user) = std::env::var("SUDO_USER") {
-        if !sudo_user.is_empty() {
-            PathBuf::from("/Users").join(&sudo_user)
-        } else {
-            home
-        }
-    } else {
-        home
-    };
+    let home = sudo_user_home_dir().or_else(dirs::home_dir)?;
 
     let base = home.join("Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files");
     if !base.exists() {
@@ -190,9 +216,7 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
 #[cfg(target_os = "linux")]
 fn detect_db_dir_impl() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let sudo_home = std::env::var("SUDO_USER").ok()
-        .filter(|s| !s.is_empty())
-        .map(|u| PathBuf::from("/home").join(u));
+    let sudo_home = sudo_user_home_dir();
 
     let mut candidates: Vec<PathBuf> = Vec::new();
     for base_home in [Some(home.clone()), sudo_home].into_iter().flatten() {
@@ -213,11 +237,30 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
         }
     }
     candidates.sort_by_key(|p| {
-        std::fs::metadata(p)
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        // 排序：取 db_storage 目录下所有 .db 文件的最新 mtime，而非目录自身的 mtime
+        // 这样当收到新消息时（只有 .db 文件被更新），能正确识别最新目录
+        latest_db_mtime(p).unwrap_or(std::time::SystemTime::UNIX_EPOCH)
     });
     candidates.into_iter().next_back()
+}
+
+/// 递归查找 db_storage 目录下所有 .db 文件的最新 mtime
+fn latest_db_mtime(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut latest = None;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let mtime = if path.is_dir() {
+                latest_db_mtime(&path).unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+            } else if path.extension().and_then(|s| s.to_str()) == Some("db") {
+                entry.metadata().and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+            } else {
+                continue;
+            };
+            latest = Some(latest.map_or(mtime, |cur| if mtime > cur { mtime } else { cur }));
+        }
+    }
+    latest
 }
 
 #[cfg(target_os = "windows")]
@@ -256,4 +299,28 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn detect_db_dir_impl() -> Option<PathBuf> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_cli_home;
+    use std::path::PathBuf;
+
+    #[test]
+    fn resolve_cli_home_prefers_sudo_home_when_present() {
+        let home = resolve_cli_home(
+            PathBuf::from("/root"),
+            Some(PathBuf::from("/Users/alice")),
+        );
+        assert_eq!(home, PathBuf::from("/Users/alice"));
+    }
+
+    #[test]
+    fn resolve_cli_home_falls_back_to_default_home() {
+        let home = resolve_cli_home(
+            PathBuf::from("/root"),
+            None,
+        );
+        assert_eq!(home, PathBuf::from("/root"));
+    }
 }

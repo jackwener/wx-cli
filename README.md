@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#安装)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 
-会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 收藏 · 统计 · 导出
+会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 群昵称 · 收藏 · 统计 · 导出
 
 </div>
 
@@ -100,10 +100,16 @@ cargo build --release
 # 1. 签名（只需做一次，WeChat 更新后重做）
 codesign --force --deep --sign - /Applications/WeChat.app
 
-# 2. 重启微信，等待完全登录
+# 2. 清理旧 TCC 授权记录（重签名后必做，否则微信截图/通话权限可能 silent 失效）
+for s in ScreenCapture Camera Microphone AppleEvents AddressBook \
+         SystemPolicyDocumentsFolder SystemPolicyDownloadsFolder SystemPolicyDesktopFolder; do
+  tccutil reset "$s" com.tencent.xinWeChat
+done
+
+# 3. 重启微信，等待完全登录
 killall WeChat && open /Applications/WeChat.app
 
-# 3. 初始化
+# 4. 初始化
 sudo wx init
 ```
 
@@ -112,6 +118,8 @@ sudo wx init
 > codesign --remove-signature "/Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib"
 > codesign --force --deep --sign - /Applications/WeChat.app
 > ```
+>
+> 重签名后 macOS 的 TCC 隐私授权按新 code signature 重新校验，旧记录会失效。如果跳过 `tccutil reset`，微信截图/视频通话/麦克风等权限可能"看起来已开启但实际拒绝"。详见 [macOS 权限与签名指南](docs/macos-permission-guide.md#五重签名后微信权限-silent-失效)。
 
 **Linux**
 
@@ -158,6 +166,17 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 
+群聊里的 `last_sender`、`sender` 和 `stats` 的 `top_senders` 会优先使用群昵称（群名片）。如果本地数据库里没有对应群昵称，则回退到联系人备注、微信昵称或 username。
+
+引用消息会在 `history` / `search` / `new-messages` 输出中显示当前回复和被引用原文：
+
+```text
+[引用] 当前回复
+  ↳ 发送者: 被引用内容
+```
+
+`--type link` / `--type file` 会包含微信 appmsg 里的链接、文件、合并聊天记录和引用消息等变体；搜索时也会匹配解压后可见的引用原文。
+
 ### 朋友圈（SNS）
 
 三个独立命令，区分"通知"和"帖子"：
@@ -186,6 +205,14 @@ wx contacts                  # 联系人列表
 wx contacts --query "李"     # 按名字搜索
 wx members "AI交流群"        # 群成员列表
 ```
+
+`wx members --json` 返回的成员字段包括：
+
+- `username`：微信内部 username
+- `display`：用于展示的名称，优先使用群昵称
+- `contact_display`：联系人备注或微信昵称
+- `group_nickname`：群昵称；本地没有记录时为空字符串
+- `is_owner`：是否群主
 
 ### 收藏 & 统计
 

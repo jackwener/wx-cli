@@ -114,6 +114,8 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         user: Option<String>,
     },
+    /// 重新加载配置和密钥（init --force 后 daemon 不会自动重读）
+    ReloadConfig,
 }
 
 

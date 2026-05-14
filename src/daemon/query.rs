@@ -4,8 +4,8 @@ use regex::Regex;
 use roxmltree::{Document, Node};
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 
 use super::cache::DbCache;
 
@@ -141,6 +141,7 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
     }).await??;
 
     let mut results = Vec::new();
+    let mut group_nickname_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
     for (username, unread, summary_bytes, ts, msg_type, sender, sender_name) in rows {
         let display = names.display(&username);
         let chat_type = chat_type_of(&username, names);
@@ -151,9 +152,13 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
         let summary = strip_group_prefix(&summary);
 
         let sender_display = if is_group && !sender.is_empty() {
-            names.map.get(&sender).cloned().unwrap_or_else(|| {
-                if !sender_name.is_empty() { sender_name.clone() } else { sender.clone() }
-            })
+            if !group_nickname_cache.contains_key(&username) {
+                let nicknames = load_group_nicknames(db, &username).await.unwrap_or_default();
+                group_nickname_cache.insert(username.clone(), nicknames);
+            }
+            let empty = HashMap::new();
+            let group_nicknames = group_nickname_cache.get(&username).unwrap_or(&empty);
+            sender_display(&sender, &sender_name, &names.map, group_nicknames)
         } else {
             String::new()
         };
@@ -197,12 +202,18 @@ pub async fn q_history(
     }
 
     let mut all_msgs: Vec<Value> = Vec::new();
+    let group_nicknames = if is_group {
+        load_group_nicknames(db, &username).await.unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
     for (db_path, table_name) in &tables {
         let path = db_path.clone();
         let tname = table_name.clone();
         let uname = username.clone();
         let is_group2 = is_group;
         let names_map = names.map.clone();
+        let group_nicknames2 = group_nicknames.clone();
         let since2 = since;
         let until2 = until;
         let limit2 = limit;
@@ -211,7 +222,7 @@ pub async fn q_history(
         let msgs: Vec<Value> = tokio::task::spawn_blocking(move || {
             // per-DB 软上限：offset + limit 已足够全局分页，避免大群全量加载
             let per_db_cap = offset2 + limit2;
-            query_messages(&path, &tname, &uname, is_group2, &names_map, since2, until2, msg_type, per_db_cap, 0)
+            query_messages(&path, &tname, &uname, is_group2, &names_map, &group_nicknames2, since2, until2, msg_type, per_db_cap, 0)
         }).await??;
 
         all_msgs.extend(msgs);
@@ -311,6 +322,19 @@ pub async fn q_search(
         by_path.entry(p).or_default().push((t, d, u));
     }
 
+    let mut group_usernames = HashSet::new();
+    for table_list in by_path.values() {
+        for (_, _, uname) in table_list {
+            if uname.contains("@chatroom") {
+                group_usernames.insert(uname.clone());
+            }
+        }
+    }
+    let group_nicknames_by_chat = load_group_nickname_maps(db, group_usernames)
+        .await
+        .unwrap_or_default();
+    let group_nicknames_by_chat = Arc::new(group_nicknames_by_chat);
+
     let mut results: Vec<Value> = Vec::new();
     let kw = keyword.to_string();
     for (db_path, table_list) in by_path {
@@ -320,13 +344,18 @@ pub async fn q_search(
         let limit2 = limit * 3;
 
         let names_map2 = names.map.clone();
+        let group_nicknames_by_chat2 = Arc::clone(&group_nicknames_by_chat);
         let found: Vec<Value> = match tokio::task::spawn_blocking(move || {
             let conn = Connection::open(&db_path)?;
             let mut all = Vec::new();
+            let empty_group_nicknames = HashMap::new();
             for (tname, display, uname) in &table_list {
                 let is_group = uname.contains("@chatroom");
+                let group_nicknames = group_nicknames_by_chat2
+                    .get(uname)
+                    .unwrap_or(&empty_group_nicknames);
                 match search_in_table(&conn, tname, &uname, is_group,
-                    &names_map2, &kw2, since2, until2, msg_type, limit2)
+                    &names_map2, group_nicknames, &kw2, since2, until2, msg_type, limit2)
                 {
                     Ok(rows) => {
                         for mut row in rows {
@@ -461,6 +490,7 @@ fn query_messages(
     chat_username: &str,
     is_group: bool,
     names_map: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
     since: Option<i64>,
     until: Option<i64>,
     msg_type: Option<i64>,
@@ -470,19 +500,18 @@ fn query_messages(
     let conn = Connection::open(db_path)?;
     let id2u = load_id2u(&conn);
 
-    let mut clauses = Vec::new();
+    let mut clauses: Vec<String> = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(s) = since {
-        clauses.push("create_time >= ?");
+        clauses.push("create_time >= ?".into());
         params.push(Box::new(s));
     }
     if let Some(u) = until {
-        clauses.push("create_time <= ?");
+        clauses.push("create_time <= ?".into());
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?");
-        params.push(Box::new(t));
+        push_msg_type_filter(&mut clauses, &mut params, t);
     }
     let where_clause = if clauses.is_empty() {
         String::new()
@@ -518,17 +547,22 @@ fn query_messages(
     let mut result = Vec::new();
     for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
         let content = decompress_message(&content_bytes, ct);
-        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
+        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map, group_nicknames);
         let text = fmt_content(local_id, local_type, &content, is_group);
+        let url = appmsg_url_for_message(local_type, &content);
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
             "local_id": local_id,
-        }));
+        });
+        if let Some(u) = url {
+            msg["url"] = serde_json::Value::String(u);
+        }
+        result.push(msg);
     }
     Ok(result)
 }
@@ -539,6 +573,7 @@ fn search_in_table(
     chat_username: &str,
     is_group: bool,
     names_map: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
     keyword: &str,
     since: Option<i64>,
     until: Option<i64>,
@@ -548,8 +583,14 @@ fn search_in_table(
     let id2u = load_id2u(conn);
     // 转义 LIKE 通配符，使用 '\' 作为 ESCAPE 字符
     let escaped_kw = keyword.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    let mut clauses = vec!["message_content LIKE ? ESCAPE '\\'".to_string()];
-    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(format!("%{}%", escaped_kw))];
+    let search_decoded_content = msg_type == Some(49);
+    let keyword_lower = keyword.to_lowercase();
+    let mut clauses: Vec<String> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    if !search_decoded_content {
+        clauses.push("message_content LIKE ? ESCAPE '\\'".to_string());
+        params.push(Box::new(format!("%{}%", escaped_kw)));
+    }
     if let Some(s) = since {
         clauses.push("create_time >= ?".into());
         params.push(Box::new(s));
@@ -559,17 +600,23 @@ fn search_in_table(
         params.push(Box::new(u));
     }
     if let Some(t) = msg_type {
-        clauses.push("local_type = ?".into());
-        params.push(Box::new(t));
+        push_msg_type_filter(&mut clauses, &mut params, t);
     }
-    let where_clause = format!("WHERE {}", clauses.join(" AND "));
+    let where_clause = if clauses.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", clauses.join(" AND "))
+    };
+    let limit_clause = if search_decoded_content { "" } else { " LIMIT ?" };
     let sql = format!(
         "SELECT local_id, local_type, create_time, real_sender_id,
                 message_content, WCDB_CT_message_content
-         FROM [{}] {} ORDER BY create_time DESC LIMIT ?",
-        table, where_clause
+         FROM [{}] {} ORDER BY create_time DESC{}",
+        table, where_clause, limit_clause
     );
-    params.push(Box::new(limit as i64));
+    if !search_decoded_content {
+        params.push(Box::new(limit as i64));
+    }
 
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
@@ -589,19 +636,49 @@ fn search_in_table(
     let mut result = Vec::new();
     for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
         let content = decompress_message(&content_bytes, ct);
-        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
+        let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map, group_nicknames);
         let text = fmt_content(local_id, local_type, &content, is_group);
+        if search_decoded_content && !matches_search_text(&content, &text, keyword, &keyword_lower) {
+            continue;
+        }
+        let url = appmsg_url_for_message(local_type, &content);
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "chat": "",
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
-        }));
+        });
+        if let Some(u) = url {
+            msg["url"] = serde_json::Value::String(u);
+        }
+        result.push(msg);
+        if search_decoded_content && result.len() >= limit {
+            break;
+        }
     }
     Ok(result)
+}
+
+fn push_msg_type_filter(
+    clauses: &mut Vec<String>,
+    params: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+    msg_type: i64,
+) {
+    clauses.push("(local_type & 4294967295) = ?".into());
+    params.push(Box::new(msg_type));
+}
+
+fn matches_search_text(raw: &str, formatted: &str, keyword: &str, keyword_lower: &str) -> bool {
+    contains_search_text(raw, keyword, keyword_lower)
+        || contains_search_text(formatted, keyword, keyword_lower)
+}
+
+fn contains_search_text(haystack: &str, keyword: &str, keyword_lower: &str) -> bool {
+    haystack.contains(keyword)
+        || (!keyword_lower.is_empty() && haystack.to_lowercase().contains(keyword_lower))
 }
 
 fn load_id2u(conn: &Connection) -> HashMap<i64, String> {
@@ -618,6 +695,368 @@ fn load_id2u(conn: &Connection) -> HashMap<i64, String> {
     map
 }
 
+async fn load_group_nicknames(
+    db: &DbCache,
+    chat_username: &str,
+) -> Result<HashMap<String, String>> {
+    if !chat_username.contains("@chatroom") {
+        return Ok(HashMap::new());
+    }
+    let Some(contact_p) = db.get("contact/contact.db").await? else {
+        return Ok(HashMap::new());
+    };
+    let chat = chat_username.to_string();
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&contact_p)?;
+        Ok::<_, anyhow::Error>(load_group_nickname_map_from_conn(&conn, &chat, None))
+    }).await?
+}
+
+async fn load_group_nickname_maps(
+    db: &DbCache,
+    chat_usernames: HashSet<String>,
+) -> Result<HashMap<String, HashMap<String, String>>> {
+    if chat_usernames.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let Some(contact_p) = db.get("contact/contact.db").await? else {
+        return Ok(HashMap::new());
+    };
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&contact_p)?;
+        let mut out = HashMap::new();
+        for chat in chat_usernames {
+            let nicknames = load_group_nickname_map_from_conn(&conn, &chat, None);
+            if !nicknames.is_empty() {
+                out.insert(chat, nicknames);
+            }
+        }
+        Ok::<_, anyhow::Error>(out)
+    }).await?
+}
+
+fn load_group_nickname_map_from_conn(
+    conn: &Connection,
+    chat_username: &str,
+    targets: Option<&HashSet<String>>,
+) -> HashMap<String, String> {
+    if !chat_username.contains("@chatroom") {
+        return HashMap::new();
+    }
+    let ext = load_group_ext_buffer(conn, chat_username);
+
+    let owned_targets = if targets.is_none() {
+        load_group_member_username_set(conn, chat_username)
+    } else {
+        None
+    };
+    let targets = targets.or(owned_targets.as_ref());
+
+    ext.as_deref()
+        .map(|buf| parse_group_nickname_map(buf, targets))
+        .unwrap_or_default()
+}
+
+fn load_group_ext_buffer(
+    conn: &Connection,
+    chat_username: &str,
+) -> Option<Vec<u8>> {
+    [
+        "SELECT ext_buffer FROM chat_room WHERE username = ? LIMIT 1",
+        "SELECT ext_buffer FROM chat_room WHERE chat_room_name = ? LIMIT 1",
+        "SELECT ext_buffer FROM chat_room WHERE name = ? LIMIT 1",
+    ].iter().find_map(|sql| {
+        conn.query_row(sql, [chat_username], |row| row.get::<_, Option<Vec<u8>>>(0))
+            .ok()
+            .flatten()
+    })
+}
+
+fn load_group_member_username_set(
+    conn: &Connection,
+    chat_username: &str,
+) -> Option<HashSet<String>> {
+    let room_id: i64 = [
+        "SELECT id FROM chat_room WHERE username = ?",
+        "SELECT id FROM chat_room WHERE chat_room_name = ?",
+        "SELECT id FROM chat_room WHERE name = ?",
+    ].iter().find_map(|sql| {
+        conn.query_row(sql, [chat_username], |row| row.get::<_, i64>(0)).ok()
+    }).unwrap_or(0);
+
+    if room_id == 0 {
+        return None;
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT c.username
+         FROM chatroom_member cm
+         LEFT JOIN contact c ON c.id = cm.member_id
+         WHERE cm.room_id = ?"
+    ).ok()?;
+    let usernames: HashSet<String> = stmt.query_map([room_id], |row| {
+        row.get::<_, String>(0)
+    }).ok()?
+    .filter_map(|r| r.ok())
+    .filter(|uid| !uid.is_empty())
+    .collect();
+
+    if usernames.is_empty() { None } else { Some(usernames) }
+}
+
+fn decode_proto_varint(raw: &[u8], offset: usize) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    let mut shift = 0u32;
+    let mut pos = offset;
+    while pos < raw.len() {
+        let byte = raw[pos];
+        pos += 1;
+        value |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Some((value, pos));
+        }
+        shift += 7;
+        if shift > 63 {
+            return None;
+        }
+    }
+    None
+}
+
+fn proto_len_fields<'a>(raw: &'a [u8]) -> Vec<(u64, &'a [u8])> {
+    let mut fields = Vec::new();
+    let mut idx = 0usize;
+    while idx < raw.len() {
+        let Some((tag, next)) = decode_proto_varint(raw, idx) else { break; };
+        if next <= idx { break; }
+        idx = next;
+        let field_no = tag >> 3;
+        let wire_type = tag & 0x07;
+        match wire_type {
+            0 => {
+                let Some((_, next)) = decode_proto_varint(raw, idx) else { break; };
+                if next <= idx { break; }
+                idx = next;
+            }
+            1 => {
+                let Some(next) = idx.checked_add(8) else { break; };
+                if next > raw.len() { break; }
+                idx = next;
+            }
+            2 => {
+                let Some((size, next)) = decode_proto_varint(raw, idx) else { break; };
+                if next <= idx { break; }
+                idx = next;
+                let Ok(size) = usize::try_from(size) else { break; };
+                let Some(end) = idx.checked_add(size) else { break; };
+                if end > raw.len() { break; }
+                fields.push((field_no, &raw[idx..end]));
+                idx = end;
+            }
+            5 => {
+                let Some(next) = idx.checked_add(4) else { break; };
+                if next > raw.len() { break; }
+                idx = next;
+            }
+            _ => break,
+        }
+    }
+    fields
+}
+
+fn proto_string_fields(raw: &[u8]) -> Vec<(u64, String)> {
+    proto_len_fields(raw)
+        .into_iter()
+        .filter_map(|(field_no, value)| {
+            if value.is_empty() || value.len() > 256 {
+                return None;
+            }
+            let text = std::str::from_utf8(value).ok()?.trim().to_string();
+            if text.is_empty() || text.chars().any(char::is_control) {
+                return None;
+            }
+            Some((field_no, text))
+        })
+        .collect()
+}
+
+fn is_strong_username_hint(value: &str) -> bool {
+    value.starts_with("wxid_")
+        || value.ends_with("@chatroom")
+        || value.starts_with("gh_")
+        || value.contains('@')
+}
+
+fn looks_like_username(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    if is_strong_username_hint(value) {
+        return true;
+    }
+    if value.len() < 6 || value.len() > 32 || value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else { return false; };
+    first.is_ascii_alphabetic()
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn pick_member_username(
+    strings: &[(u64, String)],
+    targets: Option<&HashSet<String>>,
+) -> Option<String> {
+    if let Some(targets) = targets {
+        return strings
+            .iter()
+            .find(|(_, value)| targets.contains(value))
+            .map(|(_, value)| value.clone());
+    }
+
+    for field_no in [1u64, 4u64] {
+        if let Some((_, value)) = strings
+            .iter()
+            .find(|(f, value)| *f == field_no && looks_like_username(value))
+        {
+            return Some(value.clone());
+        }
+    }
+
+    strings
+        .iter()
+        .find(|(_, value)| is_strong_username_hint(value))
+        .or_else(|| strings.iter().find(|(_, value)| looks_like_username(value)))
+        .map(|(_, value)| value.clone())
+}
+
+fn pick_group_nickname(strings: &[(u64, String)], username: &str) -> Option<String> {
+    let mut best_score = i64::MIN;
+    let mut best = String::new();
+
+    for (idx, (field_no, value)) in strings.iter().enumerate() {
+        let value = value.trim();
+        if value.is_empty()
+            || value == username
+            || is_strong_username_hint(value)
+            || value.contains('\n')
+            || value.contains('\r')
+            || value.len() > 64
+        {
+            continue;
+        }
+
+        let mut score = 0i64;
+        if *field_no == 2 {
+            score += 100;
+        }
+        if !looks_like_username(value) {
+            score += 20;
+        }
+        score += (32usize.saturating_sub(value.len())) as i64;
+        score = score * 1000 - idx as i64;
+
+        if score > best_score {
+            best_score = score;
+            best = value.to_string();
+        }
+    }
+
+    if best.is_empty() { None } else { Some(best) }
+}
+
+fn parse_group_nickname_map(
+    ext_buffer: &[u8],
+    targets: Option<&HashSet<String>>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if ext_buffer.is_empty() {
+        return out;
+    }
+
+    for (_, chunk) in proto_len_fields(ext_buffer) {
+        let strings = proto_string_fields(chunk);
+        if strings.is_empty() {
+            continue;
+        }
+        let Some(username) = pick_member_username(&strings, targets) else {
+            continue;
+        };
+        if out.contains_key(&username) {
+            continue;
+        }
+        if let Some(nickname) = pick_group_nickname(&strings, &username) {
+            out.insert(username, nickname);
+        }
+    }
+
+    out
+}
+
+fn contact_display(
+    uid: &str,
+    nick: &str,
+    remark: &str,
+    names_map: &HashMap<String, String>,
+) -> String {
+    if !remark.is_empty() {
+        remark.to_string()
+    } else if !nick.is_empty() {
+        nick.to_string()
+    } else {
+        names_map.get(uid).cloned().unwrap_or_else(|| uid.to_string())
+    }
+}
+
+fn sender_display(
+    username: &str,
+    fallback_sender_name: &str,
+    names: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
+) -> String {
+    if username.is_empty() {
+        return String::new();
+    }
+    group_nicknames
+        .get(username)
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .or_else(|| names.get(username).cloned())
+        .or_else(|| {
+            if fallback_sender_name.is_empty() {
+                None
+            } else {
+                Some(fallback_sender_name.to_string())
+            }
+        })
+        .unwrap_or_else(|| username.to_string())
+}
+
+fn group_top_senders(
+    sender_counts: &HashMap<String, i64>,
+    names: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
+    limit: usize,
+) -> Vec<Value> {
+    let mut top_senders: Vec<Value> = sender_counts.iter()
+        .map(|(username, count)| json!({
+            "sender": sender_display(username, "", names, group_nicknames),
+            "count": count,
+        }))
+        .collect();
+    top_senders.sort_by(|a, b| {
+        b["count"].as_i64().unwrap_or(0)
+            .cmp(&a["count"].as_i64().unwrap_or(0))
+            .then_with(|| {
+                a["sender"].as_str().unwrap_or("")
+                    .cmp(b["sender"].as_str().unwrap_or(""))
+            })
+    });
+    top_senders.truncate(limit);
+    top_senders
+}
+
 fn sender_label(
     real_sender_id: i64,
     content: &str,
@@ -625,15 +1064,16 @@ fn sender_label(
     chat_username: &str,
     id2u: &HashMap<i64, String>,
     names: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
 ) -> String {
     let sender_uname = id2u.get(&real_sender_id).cloned().unwrap_or_default();
     if is_group {
         if !sender_uname.is_empty() && sender_uname != chat_username {
-            return names.get(&sender_uname).cloned().unwrap_or(sender_uname);
+            return sender_display(&sender_uname, "", names, group_nicknames);
         }
         if content.contains(":\n") {
             let raw = content.splitn(2, ":\n").next().unwrap_or("");
-            return names.get(raw).cloned().unwrap_or_else(|| raw.to_string());
+            return sender_display(raw, "", names, group_nicknames);
         }
         return String::new();
     }
@@ -762,28 +1202,32 @@ fn parse_sysmsg(xml: &str) -> Option<String> {
 }
 
 fn parse_appmsg(text: &str) -> Option<String> {
-    // 简单 XML 解析，避免引入重量级 XML 库（或直接用 minidom）
-    // 这里用基本字符串搜索实现
+    if let Some(parsed) = parse_appmsg_dom(text) {
+        return Some(parsed);
+    }
+    parse_appmsg_legacy(text)
+}
+
+fn parse_appmsg_dom(text: &str) -> Option<String> {
+    let doc = Document::parse(text).ok()?;
+    let appmsg = doc.descendants().find(|node| node.has_tag_name("appmsg"))?;
+    let title = xml_text(xml_child(appmsg, "title")).unwrap_or_default();
+    let atype = xml_text(xml_child(appmsg, "type")).unwrap_or_default();
+    match atype.as_str() {
+        "6" => Some(format_file_appmsg(appmsg, &title)),
+        "19" => Some(format_record_appmsg(appmsg, &title)),
+        _ => None,
+    }
+}
+
+fn parse_appmsg_legacy(text: &str) -> Option<String> {
     let title = extract_xml_text(text, "title")?;
     let atype = extract_xml_text(text, "type").unwrap_or_default();
     match atype.as_str() {
         "6" => Some(if !title.is_empty() { format!("[文件] {}", title) } else { "[文件]".into() }),
         "57" => {
-            let ref_content = extract_xml_text(text, "content")
-                .map(|s| {
-                    // content 可能是 HTML 转义的 XML（被引用的消息是 appmsg 时）
-                    let unescaped = unescape_html(&s);
-                    // 如果解转义后是 XML，尝试递归解析
-                    if unescaped.contains("<appmsg") {
-                        if let Some(parsed) = parse_appmsg(&unescaped) {
-                            return parsed;
-                        }
-                    }
-                    let s: String = unescaped.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if s.chars().count() > 40 {
-                        format!("{}...", s.chars().take(40).collect::<String>())
-                    } else { s }
-                })
+            let ref_content = quote_refermsg_content(text)
+                .or_else(|| extract_xml_text(text, "content").and_then(|s| quote_content_text(&s, 40)))
                 .unwrap_or_default();
             let quote = if !title.is_empty() { format!("[引用] {}", title) } else { "[引用]".into() };
             if !ref_content.is_empty() {
@@ -797,6 +1241,193 @@ fn parse_appmsg(text: &str) -> Option<String> {
     }
 }
 
+fn format_file_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let mut meta = Vec::new();
+    if let Some(size) = xml_child(appmsg, "appattach")
+        .and_then(|attach| xml_text(xml_child(attach, "totallen")))
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|size| *size > 0)
+    {
+        meta.push(format_byte_size(size));
+    }
+    if let Some(ext) = xml_child(appmsg, "appattach")
+        .and_then(|attach| xml_text(xml_child(attach, "fileext")))
+        .filter(|ext| !ext.is_empty())
+    {
+        meta.push(ext);
+    }
+
+    let base = if !title.is_empty() {
+        format!("[文件] {}", title)
+    } else {
+        "[文件]".into()
+    };
+    if meta.is_empty() {
+        base
+    } else {
+        format!("{} ({})", base, meta.join(", "))
+    }
+}
+
+fn format_record_appmsg<'a, 'input>(appmsg: Node<'a, 'input>, title: &str) -> String {
+    let items = record_item_lines(appmsg);
+    let mut header = if !title.is_empty() {
+        format!("[合并聊天记录] {}", title)
+    } else {
+        "[合并聊天记录]".into()
+    };
+    if !items.is_empty() {
+        header.push_str(&format!(" ({}条)", items.len()));
+    }
+
+    let mut lines = vec![header];
+    if items.is_empty() {
+        if let Some(desc) = xml_text(xml_child(appmsg, "des")).filter(|desc| !desc.is_empty()) {
+            lines.push(format!("  {}", collapse_text(&desc, 120)));
+        }
+    } else {
+        for item in items.iter().take(10) {
+            lines.push(format!("  - {}", item));
+        }
+        if items.len() > 10 {
+            lines.push(format!("  - ... 还有{}条", items.len() - 10));
+        }
+    }
+    lines.join("\n")
+}
+
+fn record_item_lines<'a, 'input>(appmsg: Node<'a, 'input>) -> Vec<String> {
+    let mut lines = record_item_lines_from_node(appmsg);
+    if !lines.is_empty() {
+        return lines;
+    }
+
+    let Some(record_xml) = xml_text(xml_child(appmsg, "recorditem")).filter(|value| !value.is_empty()) else {
+        return Vec::new();
+    };
+    let unescaped = unescape_html(&record_xml);
+    for candidate in [&record_xml, &unescaped] {
+        if let Ok(doc) = Document::parse(candidate) {
+            lines = record_item_lines_from_node(doc.root_element());
+            if !lines.is_empty() {
+                break;
+            }
+        }
+    }
+    lines
+}
+
+fn record_item_lines_from_node<'a, 'input>(node: Node<'a, 'input>) -> Vec<String> {
+    node.descendants()
+        .filter(|child| child.has_tag_name("dataitem"))
+        .filter_map(format_record_item)
+        .collect()
+}
+
+fn format_record_item<'a, 'input>(item: Node<'a, 'input>) -> Option<String> {
+    let name = first_child_text(item, &["sourcename", "datasrcname", "sourceusername"]);
+    let desc = first_child_text(item, &["datadesc", "datatitle", "datafmt"])
+        .or_else(|| item.attribute("datatype").and_then(record_datatype_label).map(str::to_string))?;
+    let desc = collapse_text(&desc, 100);
+    if let Some(name) = name.filter(|value| !value.is_empty()) {
+        Some(format!("{}: {}", name, desc))
+    } else {
+        Some(desc)
+    }
+}
+
+fn first_child_text<'a, 'input>(node: Node<'a, 'input>, tags: &[&str]) -> Option<String> {
+    tags.iter()
+        .find_map(|tag| xml_text(xml_child(node, tag)))
+        .filter(|value| !value.is_empty())
+}
+
+fn record_datatype_label(datatype: &str) -> Option<&'static str> {
+    match datatype {
+        "1" => Some("[文本]"),
+        "2" => Some("[图片]"),
+        "3" => Some("[语音]"),
+        "4" => Some("[视频]"),
+        "6" => Some("[文件]"),
+        "17" => Some("[链接]"),
+        _ => None,
+    }
+}
+
+fn quote_refermsg_content(text: &str) -> Option<String> {
+    let refer = extract_xml_text(text, "refermsg")?;
+    let content = extract_xml_text(&refer, "content")
+        .and_then(|s| quote_content_text(&s, 80))
+        .or_else(|| {
+            extract_xml_text(&refer, "type")
+                .and_then(|t| quote_refermsg_type_label(&t).map(str::to_string))
+        })?;
+    match extract_xml_text(&refer, "displayname") {
+        Some(name) if !name.is_empty() => Some(format!("{}: {}", name, content)),
+        _ => Some(content),
+    }
+}
+
+fn quote_content_text(raw: &str, max_chars: usize) -> Option<String> {
+    let unescaped = unescape_html(raw);
+    if unescaped.contains("<appmsg") {
+        if let Some(parsed) = parse_appmsg(&unescaped) {
+            return Some(parsed);
+        }
+    }
+    let collapsed = collapse_text(&unescaped, max_chars);
+    if collapsed.is_empty() {
+        None
+    } else {
+        Some(collapsed)
+    }
+}
+
+fn quote_refermsg_type_label(t: &str) -> Option<&'static str> {
+    match t {
+        "1" => None,
+        "3" => Some("[图片]"),
+        "34" => Some("[语音]"),
+        "43" => Some("[视频]"),
+        "47" => Some("[表情]"),
+        "49" => Some("[链接/文件]"),
+        _ => None,
+    }
+}
+
+fn collapse_text(text: &str, max_chars: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > max_chars {
+        format!("{}...", collapsed.chars().take(max_chars).collect::<String>())
+    } else {
+        collapsed
+    }
+}
+
+fn format_byte_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let bytes_f = bytes as f64;
+    if bytes_f >= GB {
+        format_decimal_unit(bytes_f / GB, "GB")
+    } else if bytes_f >= MB {
+        format_decimal_unit(bytes_f / MB, "MB")
+    } else if bytes_f >= KB {
+        format_decimal_unit(bytes_f / KB, "KB")
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn format_decimal_unit(value: f64, unit: &str) -> String {
+    let mut s = format!("{:.1}", value);
+    if s.ends_with(".0") {
+        s.truncate(s.len() - 2);
+    }
+    format!("{} {}", s, unit)
+}
+
 fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
     let open = format!("<{}>", tag);
     let close = format!("</{}>", tag);
@@ -804,6 +1435,37 @@ fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
     let content_start = start + open.len();
     let end = xml[content_start..].find(&close)?;
     Some(xml[content_start..content_start + end].trim().to_string())
+}
+
+fn appmsg_url_for_message(local_type: i64, content: &str) -> Option<String> {
+    if (local_type as u64 & 0xFFFFFFFF) != 49 {
+        return None;
+    }
+    extract_appmsg_url(content)
+}
+
+fn strip_xml_cdata(s: &str) -> &str {
+    s.strip_prefix("<![CDATA[")
+        .and_then(|inner| inner.strip_suffix("]]>"))
+        .unwrap_or(s)
+}
+
+/// 从 appmsg XML 中提取链接 URL（优先取 <url>，fallback 到 <url1>）
+fn extract_appmsg_url(text: &str) -> Option<String> {
+    let xml = strip_group_prefix(text);
+    if !xml.contains("<appmsg") {
+        return None;
+    }
+    if extract_xml_text(&xml, "type").as_deref() == Some("57") {
+        return None;
+    }
+    let url = extract_xml_text(&xml, "url")
+        .or_else(|| extract_xml_text(&xml, "url1"))
+        .map(|s| unescape_html(strip_xml_cdata(&s)))?;
+    if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    Some(url)
 }
 
 fn extract_xml_attr(xml: &str, tag: &str, attr: &str) -> Option<String> {
@@ -827,6 +1489,246 @@ fn unescape_html(s: &str) -> String {
      .replace("&amp;", "&")
      .replace("&quot;", "\"")
      .replace("&apos;", "'")
+}
+
+#[cfg(test)]
+mod appmsg_tests {
+    use super::*;
+
+    #[test]
+    fn parse_forwarded_chat_record_expands_record_items() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>群聊的聊天记录</title>
+    <des>张三: 早上好
+李四: 收到</des>
+    <type>19</type>
+    <recorditem>&lt;recordinfo&gt;&lt;datalist count="2"&gt;&lt;dataitem datatype="1"&gt;&lt;sourcename&gt;张三&lt;/sourcename&gt;&lt;sourcetime&gt;1710000000&lt;/sourcetime&gt;&lt;datadesc&gt;早上好 &amp;amp; coffee&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;dataitem datatype="2"&gt;&lt;sourcename&gt;李四&lt;/sourcename&gt;&lt;sourcetime&gt;1710000060&lt;/sourcetime&gt;&lt;datafmt&gt;图片&lt;/datafmt&gt;&lt;datadesc&gt;[图片]&lt;/datadesc&gt;&lt;/dataitem&gt;&lt;/datalist&gt;&lt;/recordinfo&gt;</recorditem>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[合并聊天记录] 群聊的聊天记录 (2条)\n  - 张三: 早上好 & coffee\n  - 李四: [图片]")
+        );
+    }
+
+    #[test]
+    fn parse_file_appmsg_includes_attachment_metadata() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>report.pdf</title>
+    <type>6</type>
+    <appattach>
+      <totallen>1536</totallen>
+      <fileext>pdf</fileext>
+    </appattach>
+    <md5>abcdef123456</md5>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[文件] report.pdf (1.5 KB, pdf)")
+        );
+    }
+
+    #[test]
+    fn parse_quote_appmsg_reads_refermsg_content() {
+        let xml = r#"
+<msg>
+  <appmsg appid="" sdkver="0">
+    <title>我也没有用ai啊</title>
+    <type>57</type>
+    <content />
+    <refermsg>
+      <type>1</type>
+      <displayname>不再熬夜</displayname>
+      <content>昨天用 claude 爬小红书数据来着</content>
+    </refermsg>
+  </appmsg>
+</msg>
+        "#;
+
+        assert_eq!(
+            parse_appmsg(xml).as_deref(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    #[test]
+    fn query_messages_filters_appmsg_by_base_type() {
+        let path = temp_db_path("query_messages_filters_appmsg_by_base_type");
+        {
+            let conn = Connection::open(&path).expect("open temp db");
+            conn.execute(
+                "CREATE TABLE Msg_test (
+                    local_id INTEGER,
+                    local_type INTEGER,
+                    create_time INTEGER,
+                    real_sender_id INTEGER,
+                    message_content TEXT,
+                    WCDB_CT_message_content INTEGER
+                )",
+                [],
+            )
+            .expect("create message table");
+            conn.execute(
+                "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    1_i64,
+                    ((57_i64) << 32) | 49_i64,
+                    1775146911_i64,
+                    0_i64,
+                    r#"<msg><appmsg><title>我也没有用ai啊</title><type>57</type><content /><refermsg><displayname>不再熬夜</displayname><content>昨天用 claude 爬小红书数据来着</content></refermsg></appmsg></msg>"#,
+                    0_i64
+                ],
+            )
+            .expect("insert quote message");
+        }
+
+        let rows = query_messages(
+            &path,
+            "Msg_test",
+            "wxid_r605h38n08mv22",
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            None,
+            Some(49),
+            10,
+            0,
+        )
+        .expect("query messages");
+
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["content"].as_str(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    #[test]
+    fn search_in_table_filters_appmsg_by_base_type() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE Msg_test (
+                local_id INTEGER,
+                local_type INTEGER,
+                create_time INTEGER,
+                real_sender_id INTEGER,
+                message_content TEXT,
+                WCDB_CT_message_content INTEGER
+            )",
+            [],
+        )
+        .expect("create message table");
+        conn.execute(
+            "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                1_i64,
+                ((57_i64) << 32) | 49_i64,
+                1775146911_i64,
+                0_i64,
+                r#"<msg><appmsg><title>我也没有用ai啊</title><type>57</type><content /><refermsg><displayname>不再熬夜</displayname><content>昨天用 claude 爬小红书数据来着</content></refermsg></appmsg></msg>"#,
+                0_i64
+            ],
+        )
+        .expect("insert quote message");
+
+        let rows = search_in_table(
+            &conn,
+            "Msg_test",
+            "wxid_r605h38n08mv22",
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            "claude",
+            None,
+            None,
+            Some(49),
+            10,
+        )
+        .expect("search messages");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["content"].as_str(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    #[test]
+    fn search_in_table_matches_decompressed_formatted_appmsg_content() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE Msg_test (
+                local_id INTEGER,
+                local_type INTEGER,
+                create_time INTEGER,
+                real_sender_id INTEGER,
+                message_content BLOB,
+                WCDB_CT_message_content INTEGER
+            )",
+            [],
+        )
+        .expect("create message table");
+        let xml = r#"<msg><appmsg><title>我也没有用ai啊</title><type>57</type><content /><refermsg><displayname>不再熬夜</displayname><content>昨天用 claude 爬小红书数据来着</content></refermsg></appmsg></msg>"#;
+        let compressed = zstd::encode_all(xml.as_bytes(), 0).expect("compress appmsg xml");
+        conn.execute(
+            "INSERT INTO Msg_test VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                1_i64,
+                ((57_i64) << 32) | 49_i64,
+                1775146911_i64,
+                0_i64,
+                compressed,
+                4_i64
+            ],
+        )
+        .expect("insert compressed quote message");
+
+        let rows = search_in_table(
+            &conn,
+            "Msg_test",
+            "wxid_r605h38n08mv22",
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            "claude",
+            None,
+            None,
+            Some(49),
+            10,
+        )
+        .expect("search messages");
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0]["content"].as_str(),
+            Some("[引用] 我也没有用ai啊\n  \u{21b3} 不再熬夜: 昨天用 claude 爬小红书数据来着")
+        );
+    }
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "wx-cli-{}-{}-{}.db",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock before unix epoch")
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
 }
 
 fn fmt_time(ts: i64, fmt: &str) -> String {
@@ -904,6 +1806,7 @@ pub async fn q_unread(
     }).await??;
 
     let mut results = Vec::new();
+    let mut group_nickname_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
     for (username, unread, summary_bytes, ts, msg_type, sender, sender_name) in rows {
         let chat_type = chat_type_of(&username, names);
         if let Some(ref set) = filter_set {
@@ -916,9 +1819,13 @@ pub async fn q_unread(
         let summary = decompress_or_str(&summary_bytes);
         let summary = strip_group_prefix(&summary);
         let sender_display = if is_group && !sender.is_empty() {
-            names.map.get(&sender).cloned().unwrap_or_else(|| {
-                if !sender_name.is_empty() { sender_name.clone() } else { sender.clone() }
-            })
+            if !group_nickname_cache.contains_key(&username) {
+                let nicknames = load_group_nicknames(db, &username).await.unwrap_or_default();
+                group_nickname_cache.insert(username.clone(), nicknames);
+            }
+            let empty = HashMap::new();
+            let group_nicknames = group_nickname_cache.get(&username).unwrap_or(&empty);
+            sender_display(&sender, &sender_name, &names.map, group_nicknames)
         } else {
             String::new()
         };
@@ -955,7 +1862,6 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
     // 优先路径：contact.db → chatroom_member + chat_room（完整成员列表）
     if let Some(contact_p) = db.get("contact/contact.db").await? {
         let uname2 = username.clone();
-        let display2 = display.clone();
         let names_map2 = names_map.clone();
 
         let members_opt: Option<Vec<Value>> = tokio::task::spawn_blocking(move || {
@@ -1008,12 +1914,31 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
                 return Ok(None);
             }
 
+            let target_usernames: HashSet<String> = raw.iter()
+                .map(|(uid, _, _)| uid.clone())
+                .collect();
+            let group_nicknames = load_group_nickname_map_from_conn(
+                &conn,
+                &uname2,
+                Some(&target_usernames),
+            );
+
             let mut members: Vec<Value> = raw.iter().map(|(uid, nick, remark)| {
-                let disp = if !remark.is_empty() { remark.clone() }
-                    else if !nick.is_empty() { nick.clone() }
-                    else { names_map2.get(uid).cloned().unwrap_or_else(|| uid.clone()) };
+                let contact_display = contact_display(uid, nick, remark, &names_map2);
+                let group_nickname = group_nicknames.get(uid).cloned().unwrap_or_default();
+                let disp = if group_nickname.is_empty() {
+                    contact_display.clone()
+                } else {
+                    group_nickname.clone()
+                };
                 let is_owner = uid == &owner && !owner.is_empty();
-                json!({ "username": uid, "display": disp, "is_owner": is_owner })
+                json!({
+                    "username": uid,
+                    "display": disp,
+                    "contact_display": contact_display,
+                    "group_nickname": group_nickname,
+                    "is_owner": is_owner,
+                })
             }).collect();
 
             // 群主排首位，其余按 display 字典序
@@ -1024,7 +1949,6 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
                 a["display"].as_str().unwrap_or("").cmp(b["display"].as_str().unwrap_or(""))
             });
 
-            let _ = display2; // 不在此 closure 内使用
             Ok(Some(members))
         }).await??;
 
@@ -1075,10 +1999,20 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
         sender_set.extend(senders);
     }
 
+    let group_nicknames = load_group_nicknames(db, &username).await.unwrap_or_default();
     let mut members: Vec<Value> = sender_set.iter().map(|u| {
+        let contact_display = names_map.get(u).cloned().unwrap_or_else(|| u.clone());
+        let group_nickname = group_nicknames.get(u).cloned().unwrap_or_default();
+        let display = if group_nickname.is_empty() {
+            contact_display.clone()
+        } else {
+            group_nickname.clone()
+        };
         json!({
             "username": u,
-            "display": names_map.get(u).cloned().unwrap_or_else(|| u.clone()),
+            "display": display,
+            "contact_display": contact_display,
+            "group_nickname": group_nickname,
             "is_owner": false,
         })
     }).collect();
@@ -1163,6 +2097,11 @@ pub async fn q_new_messages(
         let display = names.display(uname);
         let chat_type = chat_type_of(uname, names);
         let is_group = chat_type == "group";
+        let group_nicknames = if is_group {
+            load_group_nicknames(db, uname).await.unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
 
         for (db_path, table_name) in &tables {
             let path = db_path.clone();
@@ -1170,6 +2109,7 @@ pub async fn q_new_messages(
             let uname2 = uname.clone();
             let display2 = display.clone();
             let names_map = names.map.clone();
+            let group_nicknames2 = group_nicknames.clone();
             let tname_for_log = tname.clone();
 
             let msgs: Vec<Value> = match tokio::task::spawn_blocking(move || {
@@ -1201,9 +2141,10 @@ pub async fn q_new_messages(
                 let mut result = Vec::new();
                 for (local_id, local_type, ts, real_sender_id, content_bytes, ct) in rows {
                     let content = decompress_message(&content_bytes, ct);
-                    let sender = sender_label(real_sender_id, &content, is_group, &uname2, &id2u, &names_map);
+                    let sender = sender_label(real_sender_id, &content, is_group, &uname2, &id2u, &names_map, &group_nicknames2);
                     let text = fmt_content(local_id, local_type, &content, is_group);
-                    result.push(json!({
+                    let url = appmsg_url_for_message(local_type, &content);
+                    let mut msg = json!({
                         "chat": display2,
                         "username": uname2,
                         "is_group": is_group,
@@ -1213,7 +2154,11 @@ pub async fn q_new_messages(
                         "sender": sender,
                         "content": text,
                         "type": fmt_type(local_type),
-                    }));
+                    });
+                    if let Some(u) = url {
+                        msg["url"] = serde_json::Value::String(u);
+                    }
+                    result.push(msg);
                 }
                 Ok::<_, anyhow::Error>(result)
             }).await {
@@ -1376,13 +2321,17 @@ pub async fn q_stats(
     let mut type_counts: HashMap<String, i64> = HashMap::new();
     let mut sender_counts: HashMap<String, i64> = HashMap::new();
     let mut hour_counts = [0i64; 24];
+    let group_nicknames = if is_group {
+        load_group_nicknames(db, &username).await.unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
 
     for (db_path, table_name) in &tables {
         let path = db_path.clone();
         let tname = table_name.clone();
         let uname = username.clone();
         let is_group2 = is_group;
-        let names_map = names.map.clone();
 
         // 用 SQL GROUP BY 在数据库侧聚合，避免把全量消息内容加载进内存
         let result: (i64, HashMap<String, i64>, HashMap<String, i64>, [i64; 24]) =
@@ -1469,8 +2418,7 @@ pub async fn q_stats(
                             for (id, cnt) in rows.flatten() {
                                 if let Some(u) = id2u.get(&id) {
                                     if u != &uname {
-                                        let name = names_map.get(u).cloned().unwrap_or_else(|| u.clone());
-                                        *sender_c.entry(name).or_insert(0) += cnt;
+                                        *sender_c.entry(u.clone()).or_insert(0) += cnt;
                                     }
                                 }
                             }
@@ -1495,11 +2443,7 @@ pub async fn q_stats(
     by_type.sort_by_key(|v| std::cmp::Reverse(v["count"].as_i64().unwrap_or(0)));
 
     // 发言排行，Top 10
-    let mut top_senders: Vec<Value> = sender_counts.iter()
-        .map(|(s, c)| json!({ "sender": s, "count": c }))
-        .collect();
-    top_senders.sort_by_key(|v| std::cmp::Reverse(v["count"].as_i64().unwrap_or(0)));
-    top_senders.truncate(10);
+    let top_senders = group_top_senders(&sender_counts, &names.map, &group_nicknames, 10);
 
     // 24小时分布
     let by_hour: Vec<Value> = hour_counts.iter().enumerate()
@@ -2002,6 +2946,104 @@ pub async fn q_sns_search(
 }
 
 #[cfg(test)]
+mod group_nickname_tests {
+    use super::*;
+
+    fn varint(mut value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let mut byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value != 0 {
+                byte |= 0x80;
+            }
+            out.push(byte);
+            if value == 0 {
+                return out;
+            }
+        }
+    }
+
+    fn len_field(field_no: u64, bytes: &[u8]) -> Vec<u8> {
+        let mut out = varint((field_no << 3) | 2);
+        out.extend(varint(bytes.len() as u64));
+        out.extend(bytes);
+        out
+    }
+
+    fn string_field(field_no: u64, value: &str) -> Vec<u8> {
+        len_field(field_no, value.as_bytes())
+    }
+
+    fn member_chunk(username: &str, group_nickname: &str) -> Vec<u8> {
+        let mut member = Vec::new();
+        member.extend(string_field(1, username));
+        member.extend(string_field(2, group_nickname));
+        len_field(1, &member)
+    }
+
+    #[test]
+    fn parses_group_nickname_member_chunks() {
+        let mut ext_buffer = Vec::new();
+        ext_buffer.extend(member_chunk("wxid_alice", "Alice In Group"));
+        ext_buffer.extend(member_chunk("bob_123456", "Bob Card"));
+
+        let nicknames = parse_group_nickname_map(&ext_buffer, None);
+
+        assert_eq!(
+            nicknames.get("wxid_alice").map(String::as_str),
+            Some("Alice In Group")
+        );
+        assert_eq!(
+            nicknames.get("bob_123456").map(String::as_str),
+            Some("Bob Card")
+        );
+    }
+
+    #[test]
+    fn target_filter_anchors_member_username_choice() {
+        let mut member = Vec::new();
+        member.extend(string_field(3, "candidate_name"));
+        member.extend(string_field(4, "wxid_target"));
+        member.extend(string_field(2, "Target Card"));
+        let ext_buffer = len_field(1, &member);
+        let targets = HashSet::from(["wxid_target".to_string()]);
+
+        let nicknames = parse_group_nickname_map(&ext_buffer, Some(&targets));
+
+        assert_eq!(
+            nicknames.get("wxid_target").map(String::as_str),
+            Some("Target Card")
+        );
+        assert!(!nicknames.contains_key("candidate_name"));
+    }
+
+    #[test]
+    fn group_top_senders_keeps_duplicate_display_names_separate() {
+        let sender_counts = HashMap::from([
+            ("wxid_alice".to_string(), 7),
+            ("wxid_bob".to_string(), 3),
+        ]);
+        let names = HashMap::from([
+            ("wxid_alice".to_string(), "Alice Contact".to_string()),
+            ("wxid_bob".to_string(), "Bob Contact".to_string()),
+        ]);
+        let group_nicknames = HashMap::from([
+            ("wxid_alice".to_string(), "同名".to_string()),
+            ("wxid_bob".to_string(), "同名".to_string()),
+        ]);
+
+        let top = group_top_senders(&sender_counts, &names, &group_nicknames, 10);
+
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0]["sender"].as_str(), Some("同名"));
+        assert_eq!(top[0]["count"].as_i64(), Some(7));
+        assert_eq!(top[1]["sender"].as_str(), Some("同名"));
+        assert_eq!(top[1]["count"].as_i64(), Some(3));
+    }
+}
+
+#[cfg(test)]
 mod sns_tests {
     use super::*;
 
@@ -2124,6 +3166,71 @@ mod sns_tests {
         assert_eq!(escape_like_pattern("hello world"), "hello world");
         assert_eq!(escape_like_pattern("中文关键词"), "中文关键词");
         assert_eq!(escape_like_pattern(""), "");
+    }
+
+    #[test]
+    fn extract_appmsg_url_unescapes_html_entities() {
+        let xml = concat!(
+            "<appmsg>",
+            "<type>5</type>",
+            "<url>https://mp.weixin.qq.com/s?__biz=MzI4&amp;mid=2247&amp;idx=1</url>",
+            "</appmsg>"
+        );
+        assert_eq!(
+            extract_appmsg_url(xml).as_deref(),
+            Some("https://mp.weixin.qq.com/s?__biz=MzI4&mid=2247&idx=1")
+        );
+    }
+
+    #[test]
+    fn extract_appmsg_url_strips_group_prefix_and_cdata() {
+        let xml = concat!(
+            "wxid_sender:\n",
+            "<appmsg>",
+            "<type>5</type>",
+            "<url><![CDATA[https://example.com/x?a=1&b=2]]></url>",
+            "</appmsg>"
+        );
+        assert_eq!(
+            extract_appmsg_url(xml).as_deref(),
+            Some("https://example.com/x?a=1&b=2")
+        );
+    }
+
+    #[test]
+    fn extract_appmsg_url_falls_back_to_url1() {
+        let xml = concat!(
+            "<appmsg>",
+            "<type>5</type>",
+            "<url1>https://example.com/fallback</url1>",
+            "</appmsg>"
+        );
+        assert_eq!(
+            extract_appmsg_url(xml).as_deref(),
+            Some("https://example.com/fallback")
+        );
+    }
+
+    #[test]
+    fn extract_appmsg_url_ignores_non_http_values() {
+        let xml = concat!(
+            "<appmsg>",
+            "<type>5</type>",
+            "<url>weixin://bizmsgmenu?msgmenucontent=foo</url>",
+            "</appmsg>"
+        );
+        assert_eq!(extract_appmsg_url(xml), None);
+    }
+
+    #[test]
+    fn extract_appmsg_url_ignores_refermsg() {
+        let xml = concat!(
+            "<appmsg>",
+            "<type>57</type>",
+            "<url>https://example.com/nested</url>",
+            "</appmsg>"
+        );
+        assert_eq!(extract_appmsg_url(xml), None);
     }
 
     fn media_object(value: &Value) -> &serde_json::Map<String, Value> {
