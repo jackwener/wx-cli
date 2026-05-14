@@ -59,6 +59,51 @@ impl DbCache {
         self.cache_dir.join(format!("{}.db", hash))
     }
 
+    pub async fn needs_refresh(&self, rel_key: &str) -> bool {
+        if !self.all_keys.contains_key(rel_key) {
+            return false;
+        }
+
+        let db_path = self.db_dir.join(
+            rel_key.replace('\\', std::path::MAIN_SEPARATOR_STR)
+                .replace('/', std::path::MAIN_SEPARATOR_STR),
+        );
+        if !db_path.exists() {
+            return false;
+        }
+
+        let wal_path = wal_path_for(&db_path);
+        let db_mt = mtime_nanos(&db_path);
+        let wal_mt = if wal_path.exists() { mtime_nanos(&wal_path) } else { 0 };
+
+        let inner = self.inner.lock().await;
+        match inner.get(rel_key) {
+            Some(entry) => {
+                entry.db_mtime != db_mt
+                    || entry.wal_mtime != wal_mt
+                    || !entry.decrypted_path.exists()
+            }
+            None => true,
+        }
+    }
+
+    pub fn message_db_keys(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self
+            .all_keys
+            .keys()
+            .filter(|k| {
+                let normalized = k.replace('\\', "/");
+                normalized.contains("message/message_")
+                    && normalized.ends_with(".db")
+                    && !normalized.contains("_fts")
+                    && !normalized.contains("_resource")
+            })
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
     /// 从持久化文件加载 mtime 记录，复用未过期的解密文件
     async fn load_persistent(&self) {
         let mtime_file = config::mtime_file();

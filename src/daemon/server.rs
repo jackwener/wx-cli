@@ -4,7 +4,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::ipc::{Request, Response};
 use super::cache::DbCache;
-use super::query::Names;
+use super::query::{self, Names};
 
 /// 启动 IPC server（Unix socket / Windows named pipe）
 pub async fn serve(
@@ -147,15 +147,8 @@ async fn dispatch(
     names: &tokio::sync::RwLock<Arc<Names>>,
 ) -> Response {
     use crate::ipc::Request::*;
-    use super::query;
 
-    // 取 guard → O(1) clone Arc → 立即 drop 锁。后续 await 期间不持有锁，
-    // 多个并发 IPC 请求可以真正并行。Names 本身不可变（由 daemon 启动时
-    // 一次性构建），共享 Arc 即可。
-    let names_arc: Arc<Names> = {
-        let guard = names.read().await;
-        Arc::clone(&*guard)
-    };
+    let names_arc = current_names(db, names).await;
 
     match req {
         Ping => Response::ok(serde_json::json!({ "pong": true })),
@@ -232,4 +225,35 @@ async fn dispatch(
             }
         }
     }
+}
+
+async fn current_names(
+    db: &DbCache,
+    names: &tokio::sync::RwLock<Arc<Names>>,
+) -> Arc<Names> {
+    if !db.needs_refresh("contact/contact.db").await {
+        return clone_names(names).await;
+    }
+
+    let mut guard = names.write().await;
+    if !db.needs_refresh("contact/contact.db").await {
+        return Arc::clone(&*guard);
+    }
+
+    match query::load_names(db).await {
+        Ok(fresh) => {
+            let fresh = Arc::new(fresh);
+            *guard = Arc::clone(&fresh);
+            fresh
+        }
+        Err(e) => {
+            eprintln!("[daemon] 刷新联系人失败: {}", e);
+            Arc::clone(&*guard)
+        }
+    }
+}
+
+async fn clone_names(names: &tokio::sync::RwLock<Arc<Names>>) -> Arc<Names> {
+    let guard = names.read().await;
+    Arc::clone(&*guard)
 }
