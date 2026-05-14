@@ -245,6 +245,7 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
 }
 
 /// 递归查找 db_storage 目录下所有 .db 文件的最新 mtime
+#[cfg(target_os = "linux")]
 fn latest_db_mtime(dir: &Path) -> Option<std::time::SystemTime> {
     let mut latest = None;
     if let Ok(entries) = std::fs::read_dir(dir) {
