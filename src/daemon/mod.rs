@@ -138,6 +138,7 @@ async fn setup_signal_handler() {
     });
 }
 
+#[cfg(unix)]
 fn cleanup_and_exit() {
     cleanup_ipc_files();
     std::process::exit(0);

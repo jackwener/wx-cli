@@ -8,6 +8,7 @@ use crate::config;
 use crate::ipc::{Request, Response};
 
 const STARTUP_TIMEOUT_SECS: u64 = 15;
+#[cfg(unix)]
 const STOP_TIMEOUT_MS: u64 = 2_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
