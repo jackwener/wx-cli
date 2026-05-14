@@ -1444,6 +1444,15 @@ fn appmsg_url_for_message(local_type: i64, content: &str) -> Option<String> {
     extract_appmsg_url(content)
 }
 
+fn extract_favorite_url(content: &str) -> Option<String> {
+    let url = extract_xml_text(content, "link")
+        .map(|s| unescape_html(strip_xml_cdata(&s)))?;
+    if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    Some(url)
+}
+
 fn strip_xml_cdata(s: &str) -> &str {
     s.strip_prefix("<![CDATA[")
         .and_then(|inner| inner.strip_suffix("]]>"))
@@ -2275,7 +2284,7 @@ pub async fn q_favorites(
             };
             // WeChat 部分版本的 update_time 为毫秒，10位以上判定为毫秒后转秒
             let ts_secs = if ts > 9_999_999_999 { ts / 1000 } else { ts };
-            json!({
+            let mut item = json!({
                 "id": local_id,
                 "type": type_str,
                 "type_num": ftype,
@@ -2284,7 +2293,13 @@ pub async fn q_favorites(
                 "preview": preview,
                 "from": fromusr,
                 "chat": chatname,
-            })
+            });
+            if ftype == 5 {
+                if let Some(url) = extract_favorite_url(&content) {
+                    item["url"] = Value::String(url);
+                }
+            }
+            item
         })
         .collect();
 
@@ -3231,6 +3246,31 @@ mod sns_tests {
             "</appmsg>"
         );
         assert_eq!(extract_appmsg_url(xml), None);
+    }
+
+    #[test]
+    fn extract_favorite_url_reads_link_tag() {
+        let xml = concat!(
+            "<favitem>",
+            "<type>5</type>",
+            "<link><![CDATA[https://mp.weixin.qq.com/s?__biz=foo&mid=1]]></link>",
+            "</favitem>"
+        );
+        assert_eq!(
+            extract_favorite_url(xml).as_deref(),
+            Some("https://mp.weixin.qq.com/s?__biz=foo&mid=1")
+        );
+    }
+
+    #[test]
+    fn extract_favorite_url_ignores_non_http_values() {
+        let xml = concat!(
+            "<favitem>",
+            "<type>5</type>",
+            "<link>weixin://favorites/item/1</link>",
+            "</favitem>"
+        );
+        assert_eq!(extract_favorite_url(xml), None);
     }
 
     fn media_object(value: &Value) -> &serde_json::Map<String, Value> {
