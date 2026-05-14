@@ -2,7 +2,6 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::Duration;
 
 use crate::config;
@@ -321,7 +320,8 @@ fn windows_pid_matches_daemon(pid: u32, expected_exe: Option<&Path>) -> Result<b
     use windows::core::PWSTR;
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     let Some(expected_exe) = expected_exe else {
@@ -335,7 +335,12 @@ fn windows_pid_matches_daemon(pid: u32, expected_exe: Option<&Path>) -> Result<b
     let mut buf = vec![0u16; 260];
     let mut len = buf.len() as u32;
     let actual = unsafe {
-        let result = QueryFullProcessImageNameW(handle, 0, PWSTR(buf.as_mut_ptr()), &mut len);
+        let result = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        );
         let _ = CloseHandle(handle);
         result
     };
@@ -386,7 +391,7 @@ fn terminate_pid_unix(pid: u32) -> Result<()> {
         if !unix_process_exists(pid) {
             return Ok(());
         }
-        thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(50));
     }
 
     bail!("等待 PID {} 退出超时", pid)
