@@ -176,6 +176,27 @@ async fn dispatch(
                 Err(e) => Response::err(e.to_string()),
             }
         }
+        Request::ReloadConfig => {
+            Response::ok(serde_json::json!({ "reloading": true }))
+        }
+        Request::BizArticles { limit, account, since, until, unread } => {
+            match query::q_biz_articles(db, &names_arc, limit, account, since, until, unread).await {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
+        Request::Attachments { chat, kinds, limit, offset, since, until } => {
+            match query::q_attachments(db, &names_arc, &chat, kinds, limit, offset, since, until).await {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
+        Request::Extract { attachment_id, output, overwrite } => {
+            match query::q_extract(db, &names_arc, &attachment_id, &output, overwrite).await {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
     }
 }
 

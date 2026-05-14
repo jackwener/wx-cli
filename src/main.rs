@@ -5,6 +5,7 @@ mod scanner;
 mod daemon;
 mod cli;
 pub mod transport;
+mod attachment;
 
 fn main() {
     if std::env::var("WX_DAEMON_MODE").is_ok() {

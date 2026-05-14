@@ -102,6 +102,21 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         user: Option<String>,
     },
+    /// 查询公众号文章推送（biz_message_0.db）
+    BizArticles {
+        #[serde(default = "default_limit_50")]
+        limit: usize,
+        /// 公众号名称过滤（模糊匹配 display name，None = 全部）
+        #[serde(skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+        /// 只看有未读消息的公众号，每个公众号取最新 1 篇
+        #[serde(default)]
+        unread: bool,
+    },
     /// 朋友圈全文搜索（匹配 contentDesc）
     SnsSearch {
         keyword: String,
@@ -113,6 +128,34 @@ pub enum Request {
         until: Option<i64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         user: Option<String>,
+    },
+    /// 重新加载配置和密钥（init --force 后 daemon 不会自动重读）
+    ReloadConfig,
+    /// 列出某个会话里的图片附件
+    /// 输出每条带 `attachment_id`（不透明 base64url 句柄），传给 `Extract` 时取回本体
+    Attachments {
+        chat: String,
+        /// 类型过滤：当前仅支持 image
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kinds: Option<Vec<String>>,
+        #[serde(default = "default_limit_50")]
+        limit: usize,
+        #[serde(default)]
+        offset: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        since: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        until: Option<i64>,
+    },
+    /// 提取（解密）单个附件的本体到指定路径
+    Extract {
+        /// `Attachments` 返回的不透明 ID
+        attachment_id: String,
+        /// 写入的绝对路径（daemon 直接写盘，不经 socket 传 binary）
+        output: String,
+        /// 已存在时是否覆盖
+        #[serde(default)]
+        overwrite: bool,
     },
 }
 

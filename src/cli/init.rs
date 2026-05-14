@@ -91,6 +91,10 @@ pub fn cmd_init(force: bool) -> Result<()> {
     std::fs::write(&config_path, serde_json::to_string_pretty(&cfg)?)
         .context("写入 config.json 失败")?;
     println!("配置已保存: {}", config_path.display());
+
+    // init 之后必须停掉旧 daemon（它用的是旧 config），下次调用会自动重启
+    let _ = crate::cli::transport::stop_daemon();
+
     println!("初始化完成，可以使用 wx sessions / wx history 等命令了");
 
     Ok(())
