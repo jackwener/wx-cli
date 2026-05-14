@@ -215,6 +215,33 @@ wx sns-search "婚礼" --user "李四" --since 2023-01-01 -n 50
 
 > 只保存你本地刷到过的朋友圈（微信 app 按需下载）。没刷到过的帖子不在本地，任何命令都拿不到。
 
+### 公众号文章
+
+公众号的文章推送存在独立的 `biz_message_0.db`，与普通 `message_0.db` 分开：
+
+```bash
+# 最近 50 篇（默认）
+wx biz-articles
+
+# 更多
+wx biz-articles -n 200
+
+# 限定公众号（名称模糊匹配 display name / username）
+wx biz-articles --account "返朴"
+
+# 时间范围（YYYY-MM-DD，发布时间，非接收时间）
+wx biz-articles --since 2026-05-01 --until 2026-05-10
+
+# 仅有未读消息的公众号，每号取最新 1 篇（适合"今天有什么新推送"扫描）
+wx biz-articles --unread
+wx biz-articles --unread --account "Datawhale"   # 与 --account 取交集
+
+# 下游消费：拿 URL 做内容抓取
+wx biz-articles --since 2026-05-10 --json | jq '.[].url'
+```
+
+每条返回的字段：`account` / `account_username`（`gh_*`）/ `title` / `url`（`mp.weixin.qq.com` 链接）/ `digest` / `cover_url` / `time` + `timestamp`（文章发布时间）/ `recv_time_str` + `recv_time`（微信接收推送的时间）。多图文推送会展开为多行。
+
 ### 收藏与统计
 
 ```bash

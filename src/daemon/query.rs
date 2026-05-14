@@ -3049,7 +3049,7 @@ pub async fn q_biz_articles(
     unread: bool,
 ) -> Result<Value> {
     let biz_path = db.get("message/biz_message_0.db").await?
-        .context("无法解密 biz_message_0.db，请确认 all_keys.json 包含对应密鑰")?
+        .context("无法解密 biz_message_0.db，请确认 all_keys.json 包含对应密钥")?
 ;
 
     // 开启 --unread：从 session.db 拿“公众号 + unread_count>0”的 username 子集，

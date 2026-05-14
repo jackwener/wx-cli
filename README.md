@@ -196,6 +196,21 @@ wx sns-search "婚礼" --user "李四" --since 2023-01-01
 
 朋友圈数据只覆盖你本地刷到过的帖子（微信 app 按需下载）。
 
+### 公众号文章
+
+公众号文章推送存在独立的 `biz_message_0.db`，用 `biz-articles` 单独查：
+
+```bash
+wx biz-articles                                   # 最近 50 篇
+wx biz-articles -n 200                            # 更多
+wx biz-articles --account "返朴"                  # 限定公众号（名称模糊匹配）
+wx biz-articles --since 2026-05-01 --until 2026-05-10
+wx biz-articles --unread                          # 仅有未读的公众号，每号取最新 1 篇
+wx biz-articles --json | jq '.[].url'             # 下游消费 URL
+```
+
+每条返回：`account` / `account_username` / `title` / `url` / `digest` / `cover_url` / `time` / `timestamp` / `recv_time_str`。多图文推送会展开成多行。
+
 ### 联系人 & 群组
 
 ```bash
