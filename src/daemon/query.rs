@@ -520,15 +520,22 @@ fn query_messages(
         let content = decompress_message(&content_bytes, ct);
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
         let text = fmt_content(local_id, local_type, &content, is_group);
-
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
             "local_id": local_id,
-        }));
+        });
+        // 对链接消息提取 URL
+        let base_type = (local_type as u64 & 0xFFFFFFFF) as i64;
+        if base_type == 49 && content.contains("<appmsg") {
+            if let Some(url) = extract_appmsg_url(&content) {
+                msg["url"] = json!(url);
+            }
+        }
+        result.push(msg);
     }
     Ok(result)
 }
@@ -592,14 +599,22 @@ fn search_in_table(
         let sender = sender_label(real_sender_id, &content, is_group, chat_username, &id2u, names_map);
         let text = fmt_content(local_id, local_type, &content, is_group);
 
-        result.push(json!({
+        let mut msg = json!({
             "timestamp": ts,
             "time": fmt_time(ts, "%Y-%m-%d %H:%M"),
             "chat": "",
             "sender": sender,
             "content": text,
             "type": fmt_type(local_type),
-        }));
+        });
+        // 对链接消息提取 URL
+        let base_type = (local_type as u64 & 0xFFFFFFFF) as i64;
+        if base_type == 49 && content.contains("<appmsg") {
+            if let Some(url) = extract_appmsg_url(&content) {
+                msg["url"] = json!(url);
+            }
+        }
+        result.push(msg);
     }
     Ok(result)
 }
@@ -795,6 +810,24 @@ fn parse_appmsg(text: &str) -> Option<String> {
         "33" | "36" | "44" => Some(if !title.is_empty() { format!("[小程序] {}", title) } else { "[小程序]".into() }),
         _ => Some(if !title.is_empty() { format!("[链接] {}", title) } else { "[链接/文件]".into() }),
     }
+}
+
+/// 从 appmsg XML 或 favitem XML 中提取链接 URL。
+/// 适用于聊天消息中的链接（appmsg type=5）和收藏文章（favitem type=5）。
+fn extract_appmsg_url(text: &str) -> Option<String> {
+    // 优先提取 <url> 标签（聊天消息中的 appmsg）
+    if let Some(url) = extract_xml_text(text, "url") {
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+    // 收藏文章使用 <link> 标签（favitem XML）
+    if let Some(link) = extract_xml_text(text, "link") {
+        if !link.is_empty() {
+            return Some(link);
+        }
+    }
+    None
 }
 
 fn extract_xml_text(xml: &str, tag: &str) -> Option<String> {
@@ -1330,7 +1363,13 @@ pub async fn q_favorites(
             };
             // WeChat 部分版本的 update_time 为毫秒，10位以上判定为毫秒后转秒
             let ts_secs = if ts > 9_999_999_999 { ts / 1000 } else { ts };
-            json!({
+            // 对文章类型收藏提取 URL（favitem XML 使用 <link> 标签）
+            let fav_url = if ftype == 5 {
+                extract_appmsg_url(&content)
+            } else {
+                None
+            };
+            let mut item = json!({
                 "id": local_id,
                 "type": type_str,
                 "type_num": ftype,
@@ -1339,7 +1378,11 @@ pub async fn q_favorites(
                 "preview": preview,
                 "from": fromusr,
                 "chat": chatname,
-            })
+            });
+            if let Some(url) = fav_url {
+                item["url"] = json!(url);
+            }
+            item
         })
         .collect();
 
