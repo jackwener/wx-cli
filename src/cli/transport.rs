@@ -124,31 +124,6 @@ pub fn ensure_daemon() -> Result<()> {
     Ok(())
 }
 
-/// 停止 daemon（如果正在运行）
-pub fn stop_daemon() -> Result<()> {
-    let pid_path = config::pid_path();
-    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-        if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            #[cfg(unix)]
-            {
-                let _ = std::process::Command::new("kill")
-                    .arg("-TERM")
-                    .arg(pid.to_string())
-                    .spawn();
-            }
-            #[cfg(windows)]
-            {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/PID", &pid.to_string()])
-                    .spawn();
-            }
-        }
-    }
-    let _ = std::fs::remove_file(config::sock_path());
-    let _ = std::fs::remove_file(&pid_path);
-    Ok(())
-}
-
 /// 启动 daemon 前检查 `~/.wx-cli/` 可写，给出比"超时"更明确的错误。
 ///
 /// 典型坑：旧版本 `sudo wx init` 把目录留成 root 属主，非 root 的 daemon
