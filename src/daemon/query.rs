@@ -987,6 +987,30 @@ fn sender_display(
         .unwrap_or_else(|| username.to_string())
 }
 
+fn group_top_senders(
+    sender_counts: &HashMap<String, i64>,
+    names: &HashMap<String, String>,
+    group_nicknames: &HashMap<String, String>,
+    limit: usize,
+) -> Vec<Value> {
+    let mut top_senders: Vec<Value> = sender_counts.iter()
+        .map(|(username, count)| json!({
+            "sender": sender_display(username, "", names, group_nicknames),
+            "count": count,
+        }))
+        .collect();
+    top_senders.sort_by(|a, b| {
+        b["count"].as_i64().unwrap_or(0)
+            .cmp(&a["count"].as_i64().unwrap_or(0))
+            .then_with(|| {
+                a["sender"].as_str().unwrap_or("")
+                    .cmp(b["sender"].as_str().unwrap_or(""))
+            })
+    });
+    top_senders.truncate(limit);
+    top_senders
+}
+
 fn sender_label(
     real_sender_id: i64,
     content: &str,
@@ -1795,8 +1819,6 @@ pub async fn q_stats(
         let tname = table_name.clone();
         let uname = username.clone();
         let is_group2 = is_group;
-        let names_map = names.map.clone();
-        let group_nicknames2 = group_nicknames.clone();
 
         // 用 SQL GROUP BY 在数据库侧聚合，避免把全量消息内容加载进内存
         let result: (i64, HashMap<String, i64>, HashMap<String, i64>, [i64; 24]) =
@@ -1883,8 +1905,7 @@ pub async fn q_stats(
                             for (id, cnt) in rows.flatten() {
                                 if let Some(u) = id2u.get(&id) {
                                     if u != &uname {
-                                        let name = sender_display(u, "", &names_map, &group_nicknames2);
-                                        *sender_c.entry(name).or_insert(0) += cnt;
+                                        *sender_c.entry(u.clone()).or_insert(0) += cnt;
                                     }
                                 }
                             }
@@ -1909,11 +1930,7 @@ pub async fn q_stats(
     by_type.sort_by_key(|v| std::cmp::Reverse(v["count"].as_i64().unwrap_or(0)));
 
     // 发言排行，Top 10
-    let mut top_senders: Vec<Value> = sender_counts.iter()
-        .map(|(s, c)| json!({ "sender": s, "count": c }))
-        .collect();
-    top_senders.sort_by_key(|v| std::cmp::Reverse(v["count"].as_i64().unwrap_or(0)));
-    top_senders.truncate(10);
+    let top_senders = group_top_senders(&sender_counts, &names.map, &group_nicknames, 10);
 
     // 24小时分布
     let by_hour: Vec<Value> = hour_counts.iter().enumerate()
@@ -2486,6 +2503,30 @@ mod group_nickname_tests {
             Some("Target Card")
         );
         assert!(!nicknames.contains_key("candidate_name"));
+    }
+
+    #[test]
+    fn group_top_senders_keeps_duplicate_display_names_separate() {
+        let sender_counts = HashMap::from([
+            ("wxid_alice".to_string(), 7),
+            ("wxid_bob".to_string(), 3),
+        ]);
+        let names = HashMap::from([
+            ("wxid_alice".to_string(), "Alice Contact".to_string()),
+            ("wxid_bob".to_string(), "Bob Contact".to_string()),
+        ]);
+        let group_nicknames = HashMap::from([
+            ("wxid_alice".to_string(), "同名".to_string()),
+            ("wxid_bob".to_string(), "同名".to_string()),
+        ]);
+
+        let top = group_top_senders(&sender_counts, &names, &group_nicknames, 10);
+
+        assert_eq!(top.len(), 2);
+        assert_eq!(top[0]["sender"].as_str(), Some("同名"));
+        assert_eq!(top[0]["count"].as_i64(), Some(7));
+        assert_eq!(top[1]["sender"].as_str(), Some("同名"));
+        assert_eq!(top[1]["count"].as_i64(), Some(3));
     }
 }
 
