@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)](#安装)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange.svg)](https://www.rust-lang.org)
 
-会话 · 聊天记录 · 搜索 · 联系人 · 群成员 · 收藏 · 统计 · 导出
+会话 · 聊天记录 · 搜索 · 发送 · 联系人 · 群成员 · 收藏 · 统计 · 导出
 
 </div>
 
@@ -38,6 +38,7 @@ npx skills add jackwener/wx-cli -g
 - **毫秒级响应** — 后台 daemon 持久缓存解密数据库，mtime 不变则复用
 - **AI 友好** — 默认 YAML 输出，更省 token & 易读；`--json` 可切换为 JSON（方便 `jq` 处理等）
 - **完全本地** — 数据不出本机，实时解密，无需全量预解密
+- **macOS 发送** — 通过微信搜索快捷键打开聊天并发送文本消息（需辅助功能权限）
 
 ---
 
@@ -150,9 +151,12 @@ wx history "AI群" --since 2026-04-01 --until 2026-04-15
 wx search "关键词"                               # 全库搜索
 wx search "关键词" -n 500                        # 放宽搜索结果条数
 wx search "会议" --in "工作群" --since 2026-01-01
+wx send "张三" "你好，今晚 8 点见"                # 发送消息（macOS）
 ```
 
 `history` / `search` / `export` 都支持 `-n` / `--limit` 指定条数。默认值只是为了避免一次性输出过多消息，不是硬上限。
+
+`send` 是 macOS 屏幕自动化命令：它会激活微信，用 `⌘F` 聚焦搜索框，打开目标聊天后发送文本。使用前需保持微信已登录，并给当前终端或 agent 应用开启"辅助功能"权限；发送过程中会临时使用剪贴板。
 
 会话/消息输出里都带 `chat_type` 字段，取值为 `private` / `group` / `official_account` / `folded`。`official_account` 涵盖公众号、订阅号、服务号及 `mphelper` / `qqsafe` 等系统通知；`folded` 对应微信里的"订阅号折叠"和"折叠群聊"两个聚合入口。
 

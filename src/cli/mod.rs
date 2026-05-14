@@ -2,6 +2,7 @@ mod init;
 pub mod sessions;
 pub mod history;
 pub mod search;
+pub mod send;
 pub mod contacts;
 pub mod export;
 pub mod daemon_cmd;
@@ -91,6 +92,14 @@ enum Commands {
         /// 输出 JSON（默认 YAML）
         #[arg(long)]
         json: bool,
+    },
+    /// 发送微信消息（macOS 屏幕自动化）
+    Send {
+        /// 聊天对象名称
+        chat: String,
+        /// 要发送的消息
+        #[arg(allow_hyphen_values = true)]
+        message: String,
     },
     /// 查看联系人
     Contacts {
@@ -282,6 +291,7 @@ fn dispatch(cli: Cli) -> Result<()> {
         Commands::Search { keyword, chats, limit, since, until, msg_type, json } => {
             search::cmd_search(keyword, chats, limit, since, until, msg_type, json)
         }
+        Commands::Send { chat, message } => send::cmd_send(chat, message),
         Commands::Contacts { query, limit, json } => contacts::cmd_contacts(query, limit, json),
         Commands::Export { chat, since, until, limit, format, output } => {
             export::cmd_export(chat, since, until, limit, format, output)
