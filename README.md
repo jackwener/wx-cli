@@ -100,10 +100,16 @@ cargo build --release
 # 1. 签名（只需做一次，WeChat 更新后重做）
 codesign --force --deep --sign - /Applications/WeChat.app
 
-# 2. 重启微信，等待完全登录
+# 2. 清理旧 TCC 授权记录（重签名后必做，否则微信截图/通话权限可能 silent 失效）
+for s in ScreenCapture Camera Microphone AppleEvents AddressBook \
+         SystemPolicyDocumentsFolder SystemPolicyDownloadsFolder SystemPolicyDesktopFolder; do
+  tccutil reset "$s" com.tencent.xinWeChat
+done
+
+# 3. 重启微信，等待完全登录
 killall WeChat && open /Applications/WeChat.app
 
-# 3. 初始化
+# 4. 初始化
 sudo wx init
 ```
 
@@ -112,6 +118,8 @@ sudo wx init
 > codesign --remove-signature "/Applications/WeChat.app/Contents/Frameworks/vlc_plugins/librtp_mpeg4_plugin.dylib"
 > codesign --force --deep --sign - /Applications/WeChat.app
 > ```
+>
+> 重签名后 macOS 的 TCC 隐私授权按新 code signature 重新校验，旧记录会失效。如果跳过 `tccutil reset`，微信截图/视频通话/麦克风等权限可能"看起来已开启但实际拒绝"。详见 [macOS 权限与签名指南](docs/macos-permission-guide.md#五重签名后微信权限-silent-失效)。
 
 **Linux**
 

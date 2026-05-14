@@ -196,3 +196,79 @@ open /Applications/WeChat.app
 | "SIP 阻止了调试微信" | ❌ SIP 只保护系统进程，微信不受 SIP 保护 |
 | "加了 sshd 到 FDA 就行" | ❌ 还需要加 `sshd-keygen-wrapper`，且要重连 SSH |
 | "微信开着也能重签名" | ❌ 运行中的 binary/dylib 被占用，codesign 会失败 |
+
+---
+
+## 五、重签名后微信权限 silent 失效
+
+### 现象
+
+完成 ad-hoc 重签名后，微信任意以下功能都可能"看起来已授权但实际被拒绝"：
+
+- 截图 / 屏幕共享（`ScreenCapture`）
+- 视频通话 / 扫码（`Camera`）
+- 语音消息 / 通话（`Microphone`）
+- 自动化、第三方输入法（`AppleEvents`）
+- 同步通讯录（`AddressBook`）
+- 文件发送 / 接收（`SystemPolicyDocumentsFolder` / `Downloads` / `Desktop`）
+
+System Settings 里通常仍看到"微信.app"开关是 ON，但运行时权限校验失败。微信会反复弹"需要开启 X 权限"。
+
+### 根因（第一性原理）
+
+macOS TCC（Transparency, Consent, and Control）按 **bundle id + csreq** 联合校验权限。`csreq`（code requirement）是从 app 的 code signature 推导出的二进制 blob，存在 `/Library/Application Support/com.apple.TCC/TCC.db` 的 `access` 表里，每条 ~160 字节。
+
+`codesign --force --deep --sign -` 把 WeChat 从官方签名换成 ad-hoc 签名（甚至 ad-hoc → ad-hoc 重签也会变），新进程的 csreq 跟旧记录里那条对不上 —— tccd 拒绝。
+
+System Settings UI 只按 client 显示开关、不重算 csreq，所以视觉上是"已授权"，运行时实际拒绝。这是 silent drift。
+
+### 修复步骤
+
+把 WeChat 在 TCC 里的旧记录全部抹掉，让 macOS 在下次微信请求权限时按新签名重新生成 csreq：
+
+```bash
+for s in ScreenCapture Camera Microphone AppleEvents AddressBook \
+         SystemPolicyDocumentsFolder SystemPolicyDownloadsFolder SystemPolicyDesktopFolder; do
+  tccutil reset "$s" com.tencent.xinWeChat
+done
+```
+
+`tccutil` 对没有授权过的 service 会报 "No such bundle identifier"，这是 no-op，不影响其他 service 的 reset。
+
+之后退出并重新打开微信，按 GUI 提示重新允许：
+
+```bash
+killall WeChat
+open /Applications/WeChat.app
+```
+
+> 这一步**应当由用户/agent 手动执行**，不在 `wx init` 里自动跑——TCC 重置会让用户的现有授权失效，需要由人决定时机。
+
+#### macOS 26 的 UI 拆分
+
+在 macOS 26 上，**隐私与安全 → 录屏与系统录音** 显示为两块，容易踩坑：
+
+| 区域 | 作用 |
+|------|------|
+| **录屏与系统录音**（上半区） | 录制屏幕内容 + 系统音频；微信截图、屏幕共享需要这一项 |
+| **仅系统录音**（下半区） | 只录系统音频；只打开这一项**不能**修复微信截图 |
+
+把 WeChat 加进上半区；只勾下半区的"仅系统录音"无效。
+
+### 验证
+
+确认 WeChat 当前是 ad-hoc 签名（这是修复前提）：
+
+```bash
+codesign -dv --verbose=4 /Applications/WeChat.app 2>&1 | grep -E "Signature|flags|TeamIdentifier"
+```
+
+期望看到：
+
+```text
+flags=0x2(adhoc)
+Signature=adhoc
+TeamIdentifier=not set
+```
+
+最直接的功能验证：在微信里使用截图、视频通话、麦克风等功能，按 GUI 弹窗的"允许"重新授权一次，之后正常工作。
