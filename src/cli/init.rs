@@ -101,10 +101,13 @@ pub fn cmd_init(force: bool) -> Result<()> {
     {
         eprintln!();
         eprintln!("⚠️  macOS 副作用提示：");
-        eprintln!("   你刚才对 /Applications/WeChat.app 做过 ad-hoc 重签，之后 macOS 可能");
-        eprintln!("   弹 \"微信\" 想访问其他 App 的数据（在微信里打开公众号文章时尤其常见）。");
-        eprintln!("   这是当前 macOS invasive init 路径的已知副作用，不是 wx-cli 在读其他 App 数据。");
-        eprintln!("   详见 docs/macos-permission-guide.md 第六节。");
+        eprintln!("   如果你是通过对 /Applications/WeChat.app 做 ad-hoc 重签来让 init 走通的，");
+        eprintln!("   之后 macOS 可能弹 \"微信\" 想访问其他 App 的数据（在微信里打开公众号文章");
+        eprintln!("   时尤其常见）。这是 ad-hoc 重签后 WeChat 的 code identity 变了导致的，");
+        eprintln!("   不是 wx-cli 在读其他 App 数据。");
+        eprintln!("   完整说明：https://github.com/jackwener/wx-cli/blob/main/docs/macos-permission-guide.md#六微信-想访问其他-app-的数据-弹窗");
+        eprintln!("   （如果你的 WeChat 仍是 Apple 官方签名、init 是靠 GUI Terminal + 开发者工具");
+        eprintln!("    授权走通的，则不会出现这个弹窗，可以忽略本提示。）");
     }
 
     Ok(())

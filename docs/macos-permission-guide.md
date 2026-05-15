@@ -311,10 +311,10 @@ codesign --force --deep --sign - /Applications/WeChat.app
 - 点"允许"通常只是放行**当前这次** WeChat 进程；下一次 WeChat 启动权限会 reset，可能还会再弹
 - 该授权一般不会在 System Settings 里留下显式开关，因为它绑定的是动态的 code identity
 
-彻底不弹（代价是放弃 macOS memory-scan）：
-- 把 `/Applications/WeChat.app` 恢复成官方签名（重装官方 WeChat 包）
-- 不再执行 `codesign --force --deep --sign -`
-- 后果：`task_for_pid` 在 Apple 签名的 hardened runtime 下会失败，当前 macOS 这条「扫内存提取 raw key」的 init 路径就用不了
+彻底不弹：
+- 把 `/Applications/WeChat.app` 恢复成官方签名（重装官方 WeChat 包），不再执行 `codesign --force --deep --sign -`
+- 这一步只是放弃**当前依赖 ad-hoc 重签的默认路径**，并不等于放弃 macOS memory-scan：在本机 GUI Terminal 下、对 Terminal.app 授予「开发者工具」TCC 权限后，`task_for_pid` 对 Apple 官方签名（hardened runtime）的 WeChat 仍能走通——参考 §一 实测表里的"Apple 签名 + 本机 Terminal sudo = ✅"
+- 真正受限的场景是 SSH 远程 + Apple 签名 WeChat：`sshd` 拿不到 TCC 开发者工具授权，这时才必须走重签路径
 
 长期方向：
-- 这条副作用的真正修复是改造 macOS 端 init，让它不再修改 `/Applications/WeChat.app`。在那之前，这是已知 trade-off。
+- 这条副作用的真正修复是把 `wx init` 重新设计成 `safe → assisted → invasive fallback` 三层：默认不动 WeChat，只有在前两条都不可行时才走 ad-hoc 重签，并先打出完整副作用清单让用户显式确认。在那之前，这是已知 trade-off。
