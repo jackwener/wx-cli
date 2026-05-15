@@ -320,9 +320,11 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
             let path = entry.path();
             if path.extension().map(|e| e == "ini").unwrap_or(false) {
                 if let Ok(content) = std::fs::read_to_string(&path) {
-                    let data_root = content.trim().to_string();
-                    if PathBuf::from(&data_root).is_dir() {
-                        let pattern = PathBuf::from(&data_root).join("xwechat_files");
+                    let Some(data_root) = resolve_windows_data_root(content.trim()) else {
+                        continue;
+                    };
+                    if data_root.is_dir() {
+                        let pattern = data_root.join("xwechat_files");
                         if let Ok(entries2) = std::fs::read_dir(&pattern) {
                             for entry2 in entries2.flatten() {
                                 let storage = entry2.path().join("db_storage");
@@ -340,6 +342,72 @@ fn detect_db_dir_impl() -> Option<PathBuf> {
     candidates.into_iter().next_back()
 }
 
+/// Resolve the data-root path that Weixin writes to its `*.ini` file under
+/// `%APPDATA%\Tencent\xwechat\config\`.
+///
+/// Observed forms in the wild:
+///   - A plain absolute path, e.g. `D:\WeChatFiles`.
+///   - The literal token `MyDocument:` (sometimes with a trailing slash),
+///     which is not a real filesystem path. Empirically this denotes
+///     "the current user's Documents folder"; users who relocated
+///     Documents to e.g. `D:\Documents` saw auto-detect fail silently
+///     because `PathBuf::from("MyDocument:").is_dir()` is false.
+///
+/// We accept either form. For the `MyDocument:` token we resolve via
+/// `SHGetKnownFolderPath(FOLDERID_Documents)`, which respects the standard
+/// shell-folder redirect at
+/// `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders\Personal`.
+#[cfg(target_os = "windows")]
+fn resolve_windows_data_root(content: &str) -> Option<PathBuf> {
+    let trimmed = content.trim();
+    // Strip an optional trailing slash so `MyDocument:\` and `MyDocument:/` also match.
+    let stripped = trimmed
+        .strip_suffix(['\\', '/'])
+        .unwrap_or(trimmed);
+    if stripped.eq_ignore_ascii_case("MyDocument:") {
+        return known_documents_dir();
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+#[cfg(target_os = "windows")]
+fn known_documents_dir() -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{
+        FOLDERID_Documents, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
+    };
+
+    // SAFETY: standard Win32 known-folder API. SHGetKnownFolderPath either returns
+    // a heap-allocated PWSTR that the caller must free with CoTaskMemFree, or an
+    // error — in which case the out-pointer is not allocated. We free on every
+    // success path. Passing a null token (HANDLE::default()) means "the calling
+    // user", which is exactly what we want.
+    unsafe {
+        let pwstr =
+            SHGetKnownFolderPath(&FOLDERID_Documents, KF_FLAG_DEFAULT, HANDLE::default()).ok()?;
+        if pwstr.0.is_null() {
+            return None;
+        }
+        // Walk the NUL-terminated wide string to compute its length.
+        let mut len = 0usize;
+        while *pwstr.0.add(len) != 0 {
+            len += 1;
+        }
+        let slice = std::slice::from_raw_parts(pwstr.0, len);
+        let os_str = OsString::from_wide(slice);
+        CoTaskMemFree(Some(pwstr.0 as *const _));
+        let path = PathBuf::from(os_str);
+        if path.as_os_str().is_empty() {
+            None
+        } else {
+            Some(path)
+        }
+    }
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn detect_db_dir_impl() -> Option<PathBuf> {
     None
@@ -351,6 +419,8 @@ mod tests {
         config_path_in_dir, default_config_path, find_existing_config_path, home_config_path,
         resolve_cli_home,
     };
+    #[cfg(target_os = "windows")]
+    use super::{known_documents_dir, resolve_windows_data_root};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -408,5 +478,25 @@ mod tests {
 
         let path = default_config_path(Some(&cwd), Some(&exe), Some(&home));
         assert_eq!(path, cwd.join("config.json"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn resolve_windows_data_root_passes_through_absolute_path() {
+        let p = resolve_windows_data_root("D:\\WeChatFiles").unwrap();
+        assert_eq!(p, PathBuf::from("D:\\WeChatFiles"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn resolve_windows_data_root_recognises_mydocument_keyword() {
+        // Should match the keyword exactly (case-insensitive, with or without trailing slash)
+        // and resolve to a non-empty Documents path via SHGetKnownFolderPath.
+        let docs = known_documents_dir().expect("Documents known folder must resolve");
+        for keyword in ["MyDocument:", "mydocument:", "MyDocument:\\", "MyDocument:/"] {
+            let resolved = resolve_windows_data_root(keyword)
+                .unwrap_or_else(|| panic!("keyword {keyword:?} should resolve"));
+            assert_eq!(resolved, docs, "keyword {keyword:?}");
+        }
     }
 }
