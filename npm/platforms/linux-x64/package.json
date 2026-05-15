@@ -1,6 +1,6 @@
 {
   "name": "@jackwener/wx-cli-linux-x64",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "wx-cli binary for Linux x64",
   "os": ["linux"],
   "cpu": ["x64"],

@@ -1,9 +1,9 @@
 pub mod wal;
 
-use anyhow::{bail, Result};
 use aes::Aes256;
-use cbc::Decryptor;
+use anyhow::{bail, Result};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
+use cbc::Decryptor;
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -65,11 +65,8 @@ fn aes_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], data: &[u8]) -> Result<Vec<u8>
         bail!("密文长度不是 AES 块大小的倍数: {}", data.len());
     }
     // 将 &[u8] 复制为 Block 数组，避免 unsafe from_raw_parts_mut
-    let mut blocks: Vec<Block> = data.chunks_exact(16)
-        .map(Block::clone_from_slice)
-        .collect();
-    Aes256CbcDec::new(key.into(), iv.into())
-        .decrypt_blocks_mut(&mut blocks);
+    let mut blocks: Vec<Block> = data.chunks_exact(16).map(Block::clone_from_slice).collect();
+    Aes256CbcDec::new(key.into(), iv.into()).decrypt_blocks_mut(&mut blocks);
     Ok(blocks.iter().flat_map(|b| b.iter().copied()).collect())
 }
 
@@ -92,15 +89,101 @@ pub fn full_decrypt(db_path: &Path, out_path: &Path, enc_key: &[u8; 32]) -> Resu
     let mut page_buf = vec![0u8; PAGE_SZ];
 
     for pgno in 1..=total_pages {
-        let n = input.read(&mut page_buf)?;
-        if n == 0 { break; }
-        // 不足一页则补零
-        if n < PAGE_SZ {
-            page_buf[n..].fill(0);
-        }
+        let page_start = (pgno - 1) * PAGE_SZ;
+        let bytes_remaining = file_size.saturating_sub(page_start);
+        read_page(&mut input, &mut page_buf, bytes_remaining)?;
         let dec = decrypt_page(enc_key, &page_buf, pgno as u32)?;
         output.write_all(&dec)?;
     }
 
     Ok(())
+}
+
+fn read_page(
+    input: &mut impl Read,
+    page_buf: &mut [u8],
+    bytes_remaining: usize,
+) -> std::io::Result<usize> {
+    let expected = bytes_remaining.min(PAGE_SZ);
+    input.read_exact(&mut page_buf[..expected])?;
+    if expected < PAGE_SZ {
+        page_buf[expected..].fill(0);
+    }
+    Ok(expected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{read_page, PAGE_SZ};
+    use std::io::{self, Read};
+
+    struct ChunkedReader {
+        chunks: Vec<Vec<u8>>,
+        chunk_idx: usize,
+        offset: usize,
+    }
+
+    impl ChunkedReader {
+        fn new(chunks: Vec<Vec<u8>>) -> Self {
+            Self {
+                chunks,
+                chunk_idx: 0,
+                offset: 0,
+            }
+        }
+    }
+
+    impl Read for ChunkedReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.chunk_idx >= self.chunks.len() {
+                return Ok(0);
+            }
+            let chunk = &self.chunks[self.chunk_idx];
+            let remaining = &chunk[self.offset..];
+            let n = remaining.len().min(buf.len());
+            buf[..n].copy_from_slice(&remaining[..n]);
+            self.offset += n;
+            if self.offset == chunk.len() {
+                self.chunk_idx += 1;
+                self.offset = 0;
+            }
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn read_page_reads_across_short_chunks() {
+        let mut reader = ChunkedReader::new(vec![vec![1; 32], vec![2; PAGE_SZ - 32]]);
+        let mut page_buf = vec![0u8; PAGE_SZ];
+
+        let n = read_page(&mut reader, &mut page_buf, PAGE_SZ).unwrap();
+
+        assert_eq!(n, PAGE_SZ);
+        assert_eq!(page_buf[0], 1);
+        assert_eq!(page_buf[31], 1);
+        assert_eq!(page_buf[32], 2);
+        assert_eq!(page_buf[PAGE_SZ - 1], 2);
+    }
+
+    #[test]
+    fn read_page_zero_pads_last_partial_page() {
+        let mut reader = ChunkedReader::new(vec![vec![7; 8], vec![9; 4]]);
+        let mut page_buf = vec![0u8; PAGE_SZ];
+
+        let n = read_page(&mut reader, &mut page_buf, 12).unwrap();
+
+        assert_eq!(n, 12);
+        assert_eq!(&page_buf[..8], &[7; 8]);
+        assert_eq!(&page_buf[8..12], &[9; 4]);
+        assert!(page_buf[12..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn read_page_errors_on_early_eof() {
+        let mut reader = ChunkedReader::new(vec![vec![1; 8]]);
+        let mut page_buf = vec![0u8; PAGE_SZ];
+
+        let err = read_page(&mut reader, &mut page_buf, 16).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "wx-cli"
-version = "0.1.10"
+version = "0.2.0"
 edition = "2021"
 description = "WeChat 4.x (macOS/Linux) local data CLI — decrypt SQLCipher DBs, query chat history, watch new messages"
 license = "Apache-2.0"
@@ -49,6 +49,9 @@ dirs = "5"
 
 # MD5 (联系人表名 Msg_<md5>)
 md5 = "0.7"
+
+# 附件 ID 编码（base64url）
+base64 = "0.22"
 
 # 正则表达式
 regex = "1"

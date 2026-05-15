@@ -25,9 +25,7 @@ async fn async_run() -> Result<()> {
     tokio::fs::create_dir_all(&cli_dir).await?;
     tokio::fs::create_dir_all(config::cache_dir()).await?;
 
-    // 写 PID 文件
     let pid = std::process::id();
-    tokio::fs::write(config::pid_path(), pid.to_string()).await?;
 
     // 注册 SIGTERM / SIGINT 处理
     setup_signal_handler().await;
@@ -39,7 +37,8 @@ async fn async_run() -> Result<()> {
     eprintln!("[daemon] DB_DIR: {}", cfg.db_dir.display());
 
     // 加载密钥
-    let keys_content = tokio::fs::read_to_string(&cfg.keys_file).await
+    let keys_content = tokio::fs::read_to_string(&cfg.keys_file)
+        .await
         .map_err(|e| anyhow::anyhow!("读取密钥文件 {:?} 失败: {}", cfg.keys_file, e))?;
     let keys_raw: serde_json::Value = serde_json::from_str(&keys_content)?;
     let all_keys = extract_keys(&keys_raw);
@@ -71,7 +70,9 @@ async fn async_run() -> Result<()> {
     let names_arc = Arc::new(tokio::sync::RwLock::new(Arc::new(names)));
 
     // 启动 IPC server（阻塞）
-    server::serve(Arc::clone(&db), Arc::clone(&names_arc)).await?;
+    let serve_result = server::serve(Arc::clone(&db), Arc::clone(&names_arc)).await;
+    cleanup_ipc_files();
+    serve_result?;
 
     Ok(())
 }
@@ -85,7 +86,9 @@ fn extract_keys(json: &serde_json::Value) -> HashMap<String, String> {
     let mut result = HashMap::new();
     if let Some(obj) = json.as_object() {
         for (k, v) in obj {
-            if k.starts_with('_') { continue; }
+            if k.starts_with('_') {
+                continue;
+            }
             let enc_key = if let Some(s) = v.as_str() {
                 s.to_string()
             } else if let Some(obj2) = v.as_object() {
@@ -121,8 +124,13 @@ async fn setup_signal_handler() {
     });
 }
 
+#[cfg(unix)]
 fn cleanup_and_exit() {
+    cleanup_ipc_files();
+    std::process::exit(0);
+}
+
+fn cleanup_ipc_files() {
     let _ = std::fs::remove_file(config::sock_path());
     let _ = std::fs::remove_file(config::pid_path());
-    std::process::exit(0);
 }

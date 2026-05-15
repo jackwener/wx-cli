@@ -1,6 +1,6 @@
 {
   "name": "@jackwener/wx-cli-darwin-x64",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "wx-cli binary for macOS x64",
   "os": ["darwin"],
   "cpu": ["x64"],
