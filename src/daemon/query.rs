@@ -106,7 +106,7 @@ pub async fn load_names(db: &DbCache) -> Result<Names> {
         .map(|u| (format!("{:x}", md5::compute(u.as_bytes())), u.clone()))
         .collect();
 
-    Ok(Names { map, md5_to_uname, msg_db_keys: Vec::new(), verify_flags })
+    Ok(Names { map, md5_to_uname, msg_db_keys: db.message_db_keys(), verify_flags })
 }
 
 /// 查询最近会话列表

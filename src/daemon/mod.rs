@@ -47,19 +47,6 @@ async fn async_run() -> Result<()> {
     // 初始化 DbCache
     let db = Arc::new(cache::DbCache::new(cfg.db_dir.clone(), all_keys.clone()).await?);
 
-    // 收集消息 DB 列表
-    let msg_db_keys: Vec<String> = all_keys
-        .keys()
-        .filter(|k| {
-            let k = k.replace('\\', "/");
-            k.contains("message/message_")
-                && k.ends_with(".db")
-                && !k.contains("_fts")
-                && !k.contains("_resource")
-        })
-        .cloned()
-        .collect();
-
     // 预热：加载联系人 + 解密 session.db
     eprintln!("[daemon] 预热...");
     let names_raw = query::load_names(&*db).await.unwrap_or_else(|e| {
@@ -67,12 +54,11 @@ async fn async_run() -> Result<()> {
         query::Names {
             map: HashMap::new(),
             md5_to_uname: HashMap::new(),
-            msg_db_keys: Vec::new(),
+            msg_db_keys: db.message_db_keys(),
             verify_flags: HashMap::new(),
         }
     });
-    let mut names = names_raw;
-    names.msg_db_keys = msg_db_keys;
+    let names = names_raw;
 
     let _ = db.get("session/session.db").await;
     let _ = db.get("sns/sns.db").await;
