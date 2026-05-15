@@ -121,6 +121,8 @@ sudo wx init
 >
 > 重签名后 macOS 的 TCC 隐私授权按新 code signature 重新校验，旧记录会失效。如果跳过 `tccutil reset`，微信截图/视频通话/麦克风等权限可能"看起来已开启但实际拒绝"。详见 [macOS 权限与签名指南](docs/macos-permission-guide.md#五重签名后微信权限-silent-失效)。
 
+> **副作用提示**：完成上面的 ad-hoc 重签后，macOS 会比较频繁地弹 `"微信" 想访问其他 App 的数据`（在微信里打开公众号文章时尤其容易触发）。这是当前 macOS invasive init 路径的已知副作用：重签后 WeChat 的 code identity 变了，它再访问自己原来的 container / 缓存数据会被系统识别为"跨 App 访问"。点"允许"通常只是放行当前 WeChat 进程；想彻底不弹得恢复官方 WeChat（代价是这条 macOS memory-scan init 会失效）。详见 [macOS 权限与签名指南 §六](docs/macos-permission-guide.md#六微信-想访问其他-app-的数据-弹窗)。
+
 **Linux**
 
 ```bash

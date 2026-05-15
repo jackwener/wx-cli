@@ -272,3 +272,49 @@ TeamIdentifier=not set
 ```
 
 最直接的功能验证：在微信里使用截图、视频通话、麦克风等功能，按 GUI 弹窗的"允许"重新授权一次，之后正常工作。
+
+---
+
+## 六、`"微信" 想访问其他 App 的数据` 弹窗
+
+### 现象
+
+执行过 `wx init`、对 `/Applications/WeChat.app` 做过 ad-hoc 重签名之后，再使用微信时会比较频繁地看到 macOS 弹出：
+
+```
+"微信" 想访问其他 App 的数据。
+单独存放 App 数据可让你更容易管理隐私和安全。
+[ 不允许 ]   [ 允许 ]
+```
+
+最常见的触发面是**在微信里打开公众号文章**，但这只是高频触发面，不是根因。
+
+### 根因（第一性原理）
+
+这弹窗是 macOS Ventura+ / 14 / 15 对 **app data container 跨身份访问** 的保护：当前进程（"微信"）正在读取另一个 code identity 的 app 留下的数据。
+
+我们当前 macOS 方案为了让 `task_for_pid` 能拿到 WeChat 的 task port、读取进程内存里的 raw key，要求用户执行：
+
+```bash
+codesign --force --deep --sign - /Applications/WeChat.app
+```
+
+这一步把 WeChat 从 Apple 官方签名换成 ad-hoc 身份。对用户来说它仍然是"微信"；对 macOS 安全模型来说，**重签前的 WeChat** 和 **重签后的 WeChat** 已经不是同一个 app identity。
+
+之后当（重签后的）微信访问它原本的 `~/Library/Containers/com.tencent.xinWeChat/...`、缓存、app group 等数据时，系统看到的是"一个新身份在读旧身份留下的 container 数据"，于是按隐私保护策略弹这个对话框。公众号文章里的 webview / cookie / 缓存路径刚好踩到了这条访问路径，所以"打开公众号就弹"会非常容易复现，但**本质不是公众号页面的问题**，而是 code identity + container access。
+
+> 注意：这**不是** "wx-cli 在偷偷读别的 App 的数据"，wx-cli 进程本身对 WeChat container 是只读访问；但**要求用户重签 WeChat** 这一步本身就是这类弹窗的直接诱因。所以这是当前 macOS invasive init 路径的已知副作用，不是与 wx-cli 无关的系统行为。
+
+### 应对
+
+短期缓解：
+- 点"允许"通常只是放行**当前这次** WeChat 进程；下一次 WeChat 启动权限会 reset，可能还会再弹
+- 该授权一般不会在 System Settings 里留下显式开关，因为它绑定的是动态的 code identity
+
+彻底不弹（代价是放弃 macOS memory-scan）：
+- 把 `/Applications/WeChat.app` 恢复成官方签名（重装官方 WeChat 包）
+- 不再执行 `codesign --force --deep --sign -`
+- 后果：`task_for_pid` 在 Apple 签名的 hardened runtime 下会失败，当前 macOS 这条「扫内存提取 raw key」的 init 路径就用不了
+
+长期方向：
+- 这条副作用的真正修复是改造 macOS 端 init，让它不再修改 `/Applications/WeChat.app`。在那之前，这是已知 trade-off。
