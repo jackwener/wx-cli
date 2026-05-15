@@ -313,7 +313,8 @@ codesign --force --deep --sign - /Applications/WeChat.app
 
 彻底不弹：
 - 把 `/Applications/WeChat.app` 恢复成官方签名（重装官方 WeChat 包），不再执行 `codesign --force --deep --sign -`
-- 这一步只是放弃**当前依赖 ad-hoc 重签的默认路径**，并不等于放弃 macOS memory-scan：在本机 GUI Terminal 下、对 Terminal.app 授予「开发者工具」TCC 权限后，`task_for_pid` 对 Apple 官方签名（hardened runtime）的 WeChat 仍能走通——参考 §一 实测表里的"Apple 签名 + 本机 Terminal sudo = ✅"
+- 这一步只是放弃**当前依赖 ad-hoc 重签的默认路径**，并不等于放弃 macOS memory-scan：在本机 GUI Terminal 下、对 Terminal.app 授予「开发者工具」TCC 权限后，`task_for_pid` 对 Apple 官方签名（hardened runtime）的 WeChat 应当仍能走通——参考 §一 实测表里的"Apple 签名 + 本机 Terminal sudo = ✅"
+- ⚠️ 实测覆盖范围说明：§一 实测表里 "Apple 签名 + 本机 Terminal sudo ✅" 的两条实证只覆盖 macOS 10.15 (Catalina) 与 11.1 (Big Sur)；macOS 14 (Sonoma) / 15 (Sequoia) 上是否仍走通**未在本项目内实测**。如果你按这条路恢复官方签名后发现 init 走不通，请回到重签路径并接受本节描述的弹窗副作用
 - 真正受限的场景是 SSH 远程 + Apple 签名 WeChat：`sshd` 拿不到 TCC 开发者工具授权，这时才必须走重签路径
 
 长期方向：

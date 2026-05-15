@@ -100,7 +100,7 @@ pub fn cmd_init(force: bool) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         eprintln!();
-        eprintln!("⚠️  macOS 副作用提示：");
+        eprintln!("[macOS] 副作用提示：");
         eprintln!("   如果你是通过对 /Applications/WeChat.app 做 ad-hoc 重签来让 init 走通的，");
         eprintln!("   之后 macOS 可能弹 \"微信\" 想访问其他 App 的数据（在微信里打开公众号文章");
         eprintln!("   时尤其常见）。这是 ad-hoc 重签后 WeChat 的 code identity 变了导致的，");
