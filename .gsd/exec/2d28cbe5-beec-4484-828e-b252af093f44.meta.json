@@ -1,0 +1,18 @@
+{
+  "id": "2d28cbe5-beec-4484-828e-b252af093f44",
+  "runtime": "bash",
+  "purpose": "Run specific TCP integration test to diagnose failures",
+  "script_chars": 101,
+  "started_at": "2026-05-13T06:52:13.464Z",
+  "finished_at": "2026-05-13T06:52:39.855Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 26391,
+  "stdout_bytes": 721,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\2d28cbe5-beec-4484-828e-b252af093f44.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\2d28cbe5-beec-4484-828e-b252af093f44.stderr"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "e9659894-3e66-4bfd-8365-764f9adc5efd",
+  "runtime": "bash",
+  "purpose": "S03 verification: cargo test + check on Windows",
+  "script_chars": 64,
+  "started_at": "2026-05-13T06:26:25.724Z",
+  "finished_at": "2026-05-13T06:26:55.752Z",
+  "exit_code": null,
+  "signal": "SIGKILL",
+  "timed_out": true,
+  "duration_ms": 30028,
+  "stdout_bytes": 0,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\e9659894-3e66-4bfd-8365-764f9adc5efd.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\e9659894-3e66-4bfd-8365-764f9adc5efd.stderr"
+}

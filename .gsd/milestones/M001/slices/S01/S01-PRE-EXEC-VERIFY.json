@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "milestoneId": "M001",
+  "sliceId": "S01",
+  "timestamp": 1778650574985,
+  "status": "pass",
+  "durationMs": 5,
+  "checks": []
+}

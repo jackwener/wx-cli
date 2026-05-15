@@ -1,0 +1,18 @@
+{
+  "id": "047f8098-b32f-48a9-8f03-614ec48dca30",
+  "runtime": "bash",
+  "purpose": "S02: check cargo run help for tcp flag",
+  "script_chars": 67,
+  "started_at": "2026-05-13T06:14:24.162Z",
+  "finished_at": "2026-05-13T06:14:44.107Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 19945,
+  "stdout_bytes": 98,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\047f8098-b32f-48a9-8f03-614ec48dca30.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\047f8098-b32f-48a9-8f03-614ec48dca30.stderr"
+}

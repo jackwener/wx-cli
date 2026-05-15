@@ -1,0 +1,21 @@
+=== GSD STRUCTURE ===
+.gsd/milestones/M001/M001-CONTEXT.md
+.gsd/milestones/M001/M001-ROADMAP.md
+.gsd/milestones/M001/slices/S01/S01-PLAN.md
+.gsd/milestones/M001/slices/S01/S01-SUMMARY.md
+.gsd/milestones/M001/slices/S01/S01-UAT.md
+.gsd/milestones/M001/slices/S01/tasks/T01-PLAN.md
+.gsd/milestones/M001/slices/S01/tasks/T01-SUMMARY.md
+.gsd/milestones/M001/slices/S01/tasks/T02-PLAN.md
+.gsd/milestones/M001/slices/S01/tasks/T02-SUMMARY.md
+.gsd/milestones/M001/slices/S01/tasks/T03-PLAN.md
+.gsd/milestones/M001/slices/S01/tasks/T03-SUMMARY.md
+.gsd/milestones/M001/slices/S02/S02-PLAN.md
+.gsd/milestones/M001/slices/S02/S02-SUMMARY.md
+.gsd/milestones/M001/slices/S02/S02-UAT.md
+.gsd/milestones/M001/slices/S02/tasks/T01-PLAN.md
+.gsd/milestones/M001/slices/S02/tasks/T01-SUMMARY.md
+.gsd/milestones/M001/slices/S02/tasks/T02-PLAN.md
+.gsd/milestones/M001/slices/S02/tasks/T02-SUMMARY.md
+.gsd/milestones/M001/slices/S02/tasks/T03-PLAN.md
+.gsd/milestones/M001/slices/S02/tasks/T03-SUMMARY.md

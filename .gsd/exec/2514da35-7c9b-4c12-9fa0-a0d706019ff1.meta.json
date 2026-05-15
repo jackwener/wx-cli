@@ -1,0 +1,18 @@
+{
+  "id": "2514da35-7c9b-4c12-9fa0-a0d706019ff1",
+  "runtime": "bash",
+  "purpose": "cargo test M001",
+  "script_chars": 88,
+  "started_at": "2026-05-13T06:56:15.570Z",
+  "finished_at": "2026-05-13T06:56:35.757Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 20187,
+  "stdout_bytes": 1350,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\2514da35-7c9b-4c12-9fa0-a0d706019ff1.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\2514da35-7c9b-4c12-9fa0-a0d706019ff1.stderr"
+}

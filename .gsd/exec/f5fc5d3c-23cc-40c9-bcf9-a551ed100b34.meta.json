@@ -1,0 +1,18 @@
+{
+  "id": "f5fc5d3c-23cc-40c9-bcf9-a551ed100b34",
+  "runtime": "bash",
+  "purpose": "Run cargo test for M001",
+  "script_chars": 26,
+  "started_at": "2026-05-13T06:49:43.854Z",
+  "finished_at": "2026-05-13T06:50:13.905Z",
+  "exit_code": null,
+  "signal": "SIGKILL",
+  "timed_out": true,
+  "duration_ms": 30051,
+  "stdout_bytes": 0,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\f5fc5d3c-23cc-40c9-bcf9-a551ed100b34.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\f5fc5d3c-23cc-40c9-bcf9-a551ed100b34.stderr"
+}

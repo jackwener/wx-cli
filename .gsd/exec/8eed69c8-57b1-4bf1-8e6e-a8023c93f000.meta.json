@@ -1,0 +1,18 @@
+{
+  "id": "8eed69c8-57b1-4bf1-8e6e-a8023c93f000",
+  "runtime": "bash",
+  "purpose": "S02 verification: verify TCP transport artifacts in source",
+  "script_chars": 348,
+  "started_at": "2026-05-13T06:11:55.713Z",
+  "finished_at": "2026-05-13T06:11:55.913Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 200,
+  "stdout_bytes": 0,
+  "stderr_bytes": 151,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\8eed69c8-57b1-4bf1-8e6e-a8023c93f000.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\8eed69c8-57b1-4bf1-8e6e-a8023c93f000.stderr"
+}

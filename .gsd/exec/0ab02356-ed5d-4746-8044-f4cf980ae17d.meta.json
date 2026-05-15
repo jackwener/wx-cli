@@ -1,0 +1,18 @@
+{
+  "id": "0ab02356-ed5d-4746-8044-f4cf980ae17d",
+  "runtime": "bash",
+  "purpose": "S01 codebase structure scan",
+  "script_chars": 145,
+  "started_at": "2026-05-13T05:32:23.949Z",
+  "finished_at": "2026-05-13T05:32:33.000Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 9051,
+  "stdout_bytes": 0,
+  "stderr_bytes": 151,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\0ab02356-ed5d-4746-8044-f4cf980ae17d.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\0ab02356-ed5d-4746-8044-f4cf980ae17d.stderr"
+}

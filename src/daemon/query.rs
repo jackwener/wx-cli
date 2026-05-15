@@ -6,7 +6,6 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
-
 use super::cache::DbCache;
 
 /// 静态编译的 Msg 表名正则，避免在热路径中重复编译
@@ -110,6 +109,7 @@ pub async fn load_names(db: &DbCache) -> Result<Names> {
 }
 
 /// 查询最近会话列表
+#[tracing::instrument(name = "query.sessions", skip(db, names))]
 pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Value> {
     let path = db.get("session/session.db").await?
         .context("无法解密 session.db")?;
@@ -180,6 +180,7 @@ pub async fn q_sessions(db: &DbCache, names: &Names, limit: usize) -> Result<Val
 }
 
 /// 查询聊天记录
+#[tracing::instrument(name = "query.history", skip(db, names))]
 pub async fn q_history(
     db: &DbCache,
     names: &Names,
@@ -244,6 +245,7 @@ pub async fn q_history(
 }
 
 /// 搜索消息
+#[tracing::instrument(name = "query.search", skip(db, names))]
 pub async fn q_search(
     db: &DbCache,
     names: &Names,
@@ -308,8 +310,8 @@ pub async fn q_search(
                 Ok::<_, anyhow::Error>(result)
             }).await {
                 Ok(Ok(v)) => v,
-                Ok(Err(e)) => { eprintln!("[search] skip DB {}: {}", rel_key, e); continue; }
-                Err(e) => { eprintln!("[search] task error {}: {}", rel_key, e); continue; }
+                Ok(Err(e)) => { tracing::warn!(db = rel_key, error = %e, "skip DB"); continue; }
+                Err(e) => { tracing::warn!(db = rel_key, error = %e, "task error"); continue; }
             };
 
             targets.extend(table_targets);
@@ -348,7 +350,7 @@ pub async fn q_search(
         let limit2 = limit * 3;
         let names_map2 = names.map.clone();
         let group_nicknames_by_chat2 = Arc::clone(&group_nicknames_by_chat);
-        let db_path_for_log = db_path.clone();
+        let _db_path_for_log = db_path.clone();
 
         join_set.spawn_blocking(move || {
             let conn = Connection::open(&db_path)?;
@@ -374,10 +376,10 @@ pub async fn q_search(
                             all.push(row);
                         }
                     }
-                    Err(e) => eprintln!("[search] skip table {} (db={}): {}", tname, db_path_for_log, e),
+                    Err(e) => tracing::warn!(table = tname, error = %e, "skip table"),
                 }
             }
-            Ok(all)
+            Ok::<_, anyhow::Error>(all)
         });
     }
 
@@ -2052,6 +2054,7 @@ pub async fn q_members(db: &DbCache, names: &Names, chat: &str) -> Result<Value>
 
 /// 查询新消息：以 session.db 的 last_timestamp 作为 inbox 索引，
 /// 只查询 last_timestamp > state[username] 的会话，精确且高效
+#[tracing::instrument(name = "query.new_messages", skip(db, names))]
 pub async fn q_new_messages(
     db: &DbCache,
     names: &Names,
@@ -2185,8 +2188,8 @@ pub async fn q_new_messages(
                 Ok::<_, anyhow::Error>(result)
             }).await {
                 Ok(Ok(v)) => v,
-                Ok(Err(e)) => { eprintln!("[new-messages] skip {}: {}", tname_for_log, e); continue; }
-                Err(e) => { eprintln!("[new-messages] task error: {}", e); continue; }
+                Ok(Err(e)) => { tracing::warn!(table = tname_for_log, error = %e, "skip"); continue; }
+                Err(e) => { tracing::warn!(error = %e, "task error"); continue; }
             };
 
             all_msgs.extend(msgs);
@@ -2889,10 +2892,7 @@ pub async fn q_sns_feed(
         for row in rows {
             scanned += 1;
             if scanned > SNS_MAX_SCAN {
-                eprintln!(
-                    "[sns_feed] scan 超过硬上限 {}，结果可能不完整。建议加 --user / --since 缩小范围。",
-                    SNS_MAX_SCAN
-                );
+                tracing::warn!(limit = SNS_MAX_SCAN, "sns_feed scan 超过硬上限，结果可能不完整");
                 break;
             }
             let (tid, uname, content) = row?;
@@ -2963,10 +2963,7 @@ pub async fn q_sns_search(
         for row in rows {
             scanned += 1;
             if scanned > SNS_MAX_SCAN {
-                eprintln!(
-                    "[sns_search] scan 超过硬上限 {}，结果可能不完整。建议缩小 keyword 或加 --user / --since。",
-                    SNS_MAX_SCAN
-                );
+                tracing::warn!(limit = SNS_MAX_SCAN, "sns_search scan 超过硬上限，结果可能不完整");
                 break;
             }
             let (tid, uname, content) = row?;

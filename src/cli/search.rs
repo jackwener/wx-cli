@@ -12,6 +12,7 @@ pub fn cmd_search(
     until: Option<String>,
     msg_type: Option<String>,
     json: bool,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
     let until_ts = until.as_deref().map(parse_time_end).transpose()?;
@@ -27,7 +28,7 @@ pub fn cmd_search(
         msg_type: type_val,
     };
 
-    let resp = transport::send(req)?;
+    let resp = transport::send(req, tcp_addr)?;
     let results = resp.data.get("results")
         .cloned()
         .unwrap_or(serde_json::Value::Array(vec![]));

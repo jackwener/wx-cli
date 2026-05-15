@@ -1,0 +1,18 @@
+{
+  "id": "0c2c8672-29d0-4244-a93e-e00b2bc5a8f8",
+  "runtime": "bash",
+  "purpose": "Check daemon start help and existing tests count",
+  "script_chars": 189,
+  "started_at": "2026-05-13T06:18:53.254Z",
+  "finished_at": "2026-05-13T06:19:09.286Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 16032,
+  "stdout_bytes": 1689,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\0c2c8672-29d0-4244-a93e-e00b2bc5a8f8.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\0c2c8672-29d0-4244-a93e-e00b2bc5a8f8.stderr"
+}

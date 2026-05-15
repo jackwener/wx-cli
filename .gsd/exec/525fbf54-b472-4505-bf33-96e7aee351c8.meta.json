@@ -1,0 +1,18 @@
+{
+  "id": "525fbf54-b472-4505-bf33-96e7aee351c8",
+  "runtime": "bash",
+  "purpose": "S04 cargo check verification",
+  "script_chars": 80,
+  "started_at": "2026-05-13T06:40:35.710Z",
+  "finished_at": "2026-05-13T06:40:45.658Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 9948,
+  "stdout_bytes": 0,
+  "stderr_bytes": 151,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\525fbf54-b472-4505-bf33-96e7aee351c8.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\525fbf54-b472-4505-bf33-96e7aee351c8.stderr"
+}

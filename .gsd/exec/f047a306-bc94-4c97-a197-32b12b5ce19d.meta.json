@@ -1,0 +1,18 @@
+{
+  "id": "f047a306-bc94-4c97-a197-32b12b5ce19d",
+  "runtime": "bash",
+  "purpose": "Check test structure and binary name",
+  "script_chars": 323,
+  "started_at": "2026-05-13T06:29:44.193Z",
+  "finished_at": "2026-05-13T06:29:44.359Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 166,
+  "stdout_bytes": 302,
+  "stderr_bytes": 151,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\f047a306-bc94-4c97-a197-32b12b5ce19d.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\f047a306-bc94-4c97-a197-32b12b5ce19d.stderr"
+}

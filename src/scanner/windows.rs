@@ -7,6 +7,7 @@
 /// - ReadProcessMemory: 读取内存内容
 use anyhow::{Context, Result};
 use std::path::Path;
+use tracing::info;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -58,8 +59,9 @@ fn find_wechat_pid() -> Option<u32> {
 }
 
 pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
-    let pid = find_wechat_pid().context("找不到 Weixin.exe 进程，请确认微信正在运行")?;
-    eprintln!("WeChat PID: {}", pid);
+    let pid = find_wechat_pid()
+        .context("找不到 Weixin.exe 进程，请确认微信正在运行")?;
+    info!("WeChat PID: {}", pid);
 
     // SAFETY: OpenProcess 请求读取权限
     let process = unsafe {
@@ -68,11 +70,11 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
     };
 
     let db_salts = collect_db_salts(db_dir);
-    eprintln!("找到 {} 个加密数据库", db_salts.len());
+    info!("找到 {} 个加密数据库", db_salts.len());
 
-    eprintln!("扫描进程内存...");
+    info!("扫描进程内存...");
     let raw_keys = scan_memory(process)?;
-    eprintln!("找到 {} 个候选密钥", raw_keys.len());
+    info!("找到 {} 个候选密钥", raw_keys.len());
 
     // SAFETY: 关闭进程句柄
     unsafe {
@@ -92,7 +94,7 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
             }
         }
     }
-    eprintln!("匹配到 {}/{} 个密钥", entries.len(), raw_keys.len());
+    info!(matched = entries.len(), total = raw_keys.len(), "密钥匹配完成");
     Ok(entries)
 }
 

@@ -1,0 +1,18 @@
+{
+  "id": "18432e08-a9f0-4b64-8ab4-b6a7e4af54bc",
+  "runtime": "bash",
+  "purpose": "Check git status for code changes",
+  "script_chars": 52,
+  "started_at": "2026-05-13T06:49:30.218Z",
+  "finished_at": "2026-05-13T06:49:30.408Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 190,
+  "stdout_bytes": 127,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\18432e08-a9f0-4b64-8ab4-b6a7e4af54bc.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\18432e08-a9f0-4b64-8ab4-b6a7e4af54bc.stderr"
+}

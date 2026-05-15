@@ -1,0 +1,2 @@
+      --tcp <TCP>  通过 TCP 连接 daemon（如 127.0.0.1:9876）
+  -h, --help       Print help

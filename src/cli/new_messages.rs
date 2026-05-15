@@ -37,9 +37,9 @@ fn save_state(new_state: &HashMap<String, i64>) -> Result<()> {
     Ok(())
 }
 
-pub fn cmd_new_messages(limit: usize, json: bool) -> Result<()> {
+pub fn cmd_new_messages(limit: usize, json: bool, tcp_addr: Option<&str>) -> Result<()> {
     let state = load_state();
-    let resp = transport::send(Request::NewMessages { state, limit })?;
+    let resp = transport::send(Request::NewMessages { state, limit }, tcp_addr)?;
 
     // 保存 daemon 返回的 new_state
     if let Some(obj) = resp.data.get("new_state").and_then(|v| v.as_object()) {

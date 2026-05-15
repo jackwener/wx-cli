@@ -1,0 +1,18 @@
+{
+  "id": "b68530a5-49f4-4b03-9d6e-2f6a389c2a69",
+  "runtime": "bash",
+  "purpose": "S04 test failure details",
+  "script_chars": 37,
+  "started_at": "2026-05-13T06:42:42.174Z",
+  "finished_at": "2026-05-13T06:43:08.341Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 26167,
+  "stdout_bytes": 1052,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\b68530a5-49f4-4b03-9d6e-2f6a389c2a69.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\b68530a5-49f4-4b03-9d6e-2f6a389c2a69.stderr"
+}

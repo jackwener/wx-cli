@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T01",
+  "unitId": "M001/S01/T01",
+  "timestamp": 1778651217564,
+  "passed": true,
+  "discoverySource": "preference",
+  "checks": [
+    {
+      "command": "cargo test",
+      "exitCode": 0,
+      "durationMs": 604,
+      "verdict": "pass"
+    },
+    {
+      "command": "cargo clippy",
+      "exitCode": 0,
+      "durationMs": 2728,
+      "verdict": "pass"
+    }
+  ]
+}

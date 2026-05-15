@@ -1,0 +1,18 @@
+{
+  "id": "9c96370f-8aa0-4cf2-9e11-05334e65a9c8",
+  "runtime": "bash",
+  "purpose": "Check S03 directory and files",
+  "script_chars": 197,
+  "started_at": "2026-05-13T06:21:34.167Z",
+  "finished_at": "2026-05-13T06:21:34.359Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 192,
+  "stdout_bytes": 447,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9c96370f-8aa0-4cf2-9e11-05334e65a9c8.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9c96370f-8aa0-4cf2-9e11-05334e65a9c8.stderr"
+}

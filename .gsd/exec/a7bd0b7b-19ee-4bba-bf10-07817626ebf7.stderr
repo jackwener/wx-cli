@@ -1,0 +1,2 @@
+wsl: Failed to mount E:\, see dmesg for more details.
+/bin/bash: line 1: cd: C:/Users/david/Work/wx-cli/.gsd/worktrees/M001: No such file or directory

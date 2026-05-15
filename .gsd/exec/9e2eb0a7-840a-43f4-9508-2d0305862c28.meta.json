@@ -1,0 +1,18 @@
+{
+  "id": "9e2eb0a7-840a-43f4-9508-2d0305862c28",
+  "runtime": "bash",
+  "purpose": "cargo check M001",
+  "script_chars": 27,
+  "started_at": "2026-05-13T06:55:49.752Z",
+  "finished_at": "2026-05-13T06:55:52.408Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 2656,
+  "stdout_bytes": 394,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9e2eb0a7-840a-43f4-9508-2d0305862c28.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9e2eb0a7-840a-43f4-9508-2d0305862c28.stderr"
+}

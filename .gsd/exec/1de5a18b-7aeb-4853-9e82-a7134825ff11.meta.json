@@ -1,0 +1,18 @@
+{
+  "id": "1de5a18b-7aeb-4853-9e82-a7134825ff11",
+  "runtime": "bash",
+  "purpose": "detailed test failure output",
+  "script_chars": 51,
+  "started_at": "2026-05-13T07:36:18.984Z",
+  "finished_at": "2026-05-13T07:36:36.791Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 17807,
+  "stdout_bytes": 709,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\1de5a18b-7aeb-4853-9e82-a7134825ff11.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\1de5a18b-7aeb-4853-9e82-a7134825ff11.stderr"
+}

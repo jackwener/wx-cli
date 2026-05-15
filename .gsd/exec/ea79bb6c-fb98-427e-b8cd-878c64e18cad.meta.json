@@ -1,0 +1,18 @@
+{
+  "id": "ea79bb6c-fb98-427e-b8cd-878c64e18cad",
+  "runtime": "bash",
+  "purpose": "Read cli.rs and Cargo.toml for CLI structure",
+  "script_chars": 179,
+  "started_at": "2026-05-13T06:00:38.121Z",
+  "finished_at": "2026-05-13T06:00:38.292Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 171,
+  "stdout_bytes": 19,
+  "stderr_bytes": 97,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ea79bb6c-fb98-427e-b8cd-878c64e18cad.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ea79bb6c-fb98-427e-b8cd-878c64e18cad.stderr"
+}

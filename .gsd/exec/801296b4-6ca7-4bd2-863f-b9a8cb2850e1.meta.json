@@ -1,0 +1,18 @@
+{
+  "id": "801296b4-6ca7-4bd2-863f-b9a8cb2850e1",
+  "runtime": "bash",
+  "purpose": "Cross-platform cargo check for current state",
+  "script_chars": 27,
+  "started_at": "2026-05-13T06:01:36.511Z",
+  "finished_at": "2026-05-13T06:02:06.554Z",
+  "exit_code": null,
+  "signal": "SIGKILL",
+  "timed_out": true,
+  "duration_ms": 30043,
+  "stdout_bytes": 0,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\801296b4-6ca7-4bd2-863f-b9a8cb2850e1.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\801296b4-6ca7-4bd2-863f-b9a8cb2850e1.stderr"
+}

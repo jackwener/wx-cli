@@ -1,0 +1,18 @@
+{
+  "id": "0e618abb-b0a8-484a-89b2-c602f41a4332",
+  "runtime": "python",
+  "purpose": "check tasks table schema",
+  "script_chars": 390,
+  "started_at": "2026-05-13T07:43:33.710Z",
+  "finished_at": "2026-05-13T07:43:33.895Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 185,
+  "stdout_bytes": 8334,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\0e618abb-b0a8-484a-89b2-c602f41a4332.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\0e618abb-b0a8-484a-89b2-c602f41a4332.stderr"
+}

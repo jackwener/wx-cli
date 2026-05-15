@@ -1,21 +1,62 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tracing::{error, info};
 
 use crate::ipc::{Request, Response};
+use crate::transport::{self, Listener};
 use super::cache::DbCache;
 use super::query::Names;
 
-/// 启动 IPC server（Unix socket / Windows named pipe）
+/// 启动 IPC server（Unix socket / Windows named pipe + 可选 TCP）
+///
+/// 当 `tcp_addr` 为 `Some` 时，同时监听 TCP 端口；daemon 在 local listener 退出时退出。
 pub async fn serve(
     db: Arc<DbCache>,
     names: Arc<tokio::sync::RwLock<Arc<Names>>>,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
+    // TCP 先启动为后台任务
+    if let Some(addr) = tcp_addr {
+        let socket_addr: std::net::SocketAddr = addr.parse().map_err(|e| {
+            anyhow::anyhow!("TCP 地址解析失败 '{}': {}", addr, e)
+        })?;
+        let db_tcp = Arc::clone(&db);
+        let names_tcp = Arc::clone(&names);
+        tokio::spawn(async move {
+            if let Err(e) = serve_tcp(socket_addr, db_tcp, names_tcp).await {
+                error!(error = %e, "TCP 监听错误");
+            }
+        });
+    }
+
     #[cfg(unix)]
     serve_unix(db, names).await?;
     #[cfg(windows)]
     serve_windows(db, names).await?;
     Ok(())
+}
+
+async fn serve_tcp(
+    addr: std::net::SocketAddr,
+    db: Arc<DbCache>,
+    names: Arc<tokio::sync::RwLock<Arc<Names>>>,
+) -> Result<()> {
+    let listener = transport::TcpListener::bind(addr).await?;
+    info!("监听 TCP {}", addr);
+
+    // TcpListener::accept 返回 Pin<Box<dyn Future>>，需要 Box::pin 包装循环
+    let mut listener = listener;
+    loop {
+        let stream = listener.accept().await?;
+        let db2 = Arc::clone(&db);
+        let names2 = Arc::clone(&names);
+        tokio::spawn(async move {
+            if let Err(e) = transport::handle_connection(stream, &db2, &names2).await {
+                error!(error = %e, "TCP 连接处理错误");
+            }
+        });
+    }
 }
 
 #[cfg(unix)]
@@ -39,7 +80,7 @@ async fn serve_unix(
         std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600))?;
     }
 
-    eprintln!("[server] 监听 {}", sock_path.display());
+    info!("监听 Unix socket {}", sock_path.display());
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -47,40 +88,11 @@ async fn serve_unix(
         let names2 = Arc::clone(&names);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_connection_unix(stream, db2, names2).await {
-                eprintln!("[server] 连接处理错误: {}", e);
+            if let Err(e) = transport::handle_connection(stream, &db2, &names2).await {
+                error!(error = %e, "连接处理错误");
             }
         });
     }
-}
-
-#[cfg(unix)]
-async fn handle_connection_unix(
-    stream: tokio::net::UnixStream,
-    db: Arc<DbCache>,
-    names: Arc<tokio::sync::RwLock<Arc<Names>>>,
-) -> Result<()> {
-    let (reader, mut writer) = stream.into_split();
-    let mut lines = BufReader::new(reader).lines();
-
-    let line = match lines.next_line().await? {
-        Some(l) => l,
-        None => return Ok(()),
-    };
-
-    // 解析请求
-    let req: Request = match serde_json::from_str(&line) {
-        Ok(r) => r,
-        Err(e) => {
-            let resp = Response::err(format!("JSON 解析错误: {}", e));
-            writer.write_all(resp.to_json_line()?.as_bytes()).await?;
-            return Ok(());
-        }
-    };
-
-    let resp = dispatch(req, &db, &names).await;
-    writer.write_all(resp.to_json_line()?.as_bytes()).await?;
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -98,7 +110,7 @@ async fn serve_windows(
     let opts = ListenerOptions::new().name(name);
     let listener = opts.create_tokio()?;
 
-    eprintln!("[server] 监听 \\\\.\\pipe\\wx-cli-daemon");
+    info!("监听 Windows named pipe \\\\.\\pipe\\wx-cli-daemon");
 
     loop {
         let conn = listener.accept().await?;
@@ -106,14 +118,15 @@ async fn serve_windows(
         let names2 = Arc::clone(&names);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_connection_windows(conn, db2, names2).await {
-                eprintln!("[server] 连接处理错误: {}", e);
+            if let Err(e) = transport::handle_connection(conn, &db2, &names2).await {
+                error!(error = %e, "连接处理错误");
             }
         });
     }
 }
 
 #[cfg(windows)]
+#[allow(dead_code)]
 async fn handle_connection_windows(
     conn: interprocess::local_socket::tokio::Stream,
     db: Arc<DbCache>,
@@ -141,6 +154,7 @@ async fn handle_connection_windows(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn dispatch(
     req: Request,
     db: &DbCache,

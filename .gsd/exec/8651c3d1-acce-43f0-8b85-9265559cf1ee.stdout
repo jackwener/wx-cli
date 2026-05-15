@@ -1,0 +1,13 @@
+
+failures:
+
+---- cli::transport::integration_tests::test_send_tcp_round_trip stdout ----
+
+thread 'cli::transport::integration_tests::test_send_tcp_round_trip' (2126) panicked at src/cli/transport.rs:374:81:
+--
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip stdout ----
+[test] spawned daemon PID 2211
+
+thread 'cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip' (2128) panicked at src/cli/transport.rs:466:13:

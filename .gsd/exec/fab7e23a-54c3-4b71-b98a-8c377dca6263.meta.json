@@ -1,0 +1,18 @@
+{
+  "id": "fab7e23a-54c3-4b71-b98a-8c377dca6263",
+  "runtime": "bash",
+  "purpose": "Find S03 plan file path",
+  "script_chars": 208,
+  "started_at": "2026-05-13T06:21:14.876Z",
+  "finished_at": "2026-05-13T06:21:26.379Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 11503,
+  "stdout_bytes": 982,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\fab7e23a-54c3-4b71-b98a-8c377dca6263.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\fab7e23a-54c3-4b71-b98a-8c377dca6263.stderr"
+}

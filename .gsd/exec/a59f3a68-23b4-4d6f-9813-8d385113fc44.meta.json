@@ -1,0 +1,18 @@
+{
+  "id": "a59f3a68-23b4-4d6f-9813-8d385113fc44",
+  "runtime": "bash",
+  "purpose": "run only non-daemon TCP tests",
+  "script_chars": 120,
+  "started_at": "2026-05-13T07:38:09.750Z",
+  "finished_at": "2026-05-13T07:38:14.330Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 4580,
+  "stdout_bytes": 0,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a59f3a68-23b4-4d6f-9813-8d385113fc44.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a59f3a68-23b4-4d6f-9813-8d385113fc44.stderr"
+}

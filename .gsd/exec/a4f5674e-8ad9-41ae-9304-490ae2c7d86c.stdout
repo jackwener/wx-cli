@@ -1,0 +1,5 @@
+Before: [('T01', 'pending'), ('T02', 'complete')]
+Rows updated: 2
+After: [('T01', 'complete'), ('T02', 'complete')]
+Slices: [('S01', 'complete'), ('S02', 'complete'), ('S03', 'complete'), ('S04', 'complete')]
+Milestone: [('M001', 'active')]

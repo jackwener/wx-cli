@@ -1,0 +1,18 @@
+{
+  "id": "c7840772-9d53-43dc-aca2-dfae91bfb855",
+  "runtime": "bash",
+  "purpose": "Check for S03 plan file in all locations",
+  "script_chars": 207,
+  "started_at": "2026-05-13T06:21:38.121Z",
+  "finished_at": "2026-05-13T06:21:38.309Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 188,
+  "stdout_bytes": 92,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\c7840772-9d53-43dc-aca2-dfae91bfb855.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\c7840772-9d53-43dc-aca2-dfae91bfb855.stderr"
+}

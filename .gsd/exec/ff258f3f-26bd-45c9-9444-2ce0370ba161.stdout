@@ -1,0 +1,24 @@
+/mnt/c/Users/david/Work/wx-cli/.gsd/worktrees/M001
+total 92
+drwxrwxrwx 1 david david  4096 May 13 13:44 .
+drwxrwxrwx 1 david david  4096 May 13 13:32 ..
+drwxrwxrwx 1 david david  4096 May 13 13:32 .bg-shell
+drwxrwxrwx 1 david david  4096 May 13 13:32 .claude
+-rwxrwxrwx 1 david david    55 May 13 13:32 .git
+drwxrwxrwx 1 david david  4096 May 13 13:32 .github
+-rwxrwxrwx 1 david david   393 May 13 13:32 .gitignore
+drwxrwxrwx 1 david david  4096 May 13 14:43 .gsd
+-rwxrwxrwx 1 david david  1302 May 13 13:32 AGENTS.md
+-rwxrwxrwx 1 david david  2441 May 13 13:32 CLAUDE.md
+-rwxrwxrwx 1 david david 37793 May 13 13:32 Cargo.lock
+-rwxrwxrwx 1 david david  1689 May 13 13:32 Cargo.toml
+-rwxrwxrwx 1 david david 11560 May 13 13:32 LICENSE
+-rwxrwxrwx 1 david david  8344 May 13 13:32 README.md
+-rwxrwxrwx 1 david david  7038 May 13 13:32 SKILL.md
+-rwxrwxrwx 1 david david   171 May 13 13:32 config.example.json
+drwxrwxrwx 1 david david  4096 May 13 13:32 docs
+-rwxrwxrwx 1 david david  2256 May 13 13:32 install.ps1
+-rwxrwxrwx 1 david david  2201 May 13 13:32 install.sh
+drwxrwxrwx 1 david david  4096 May 13 13:32 npm
+drwxrwxrwx 1 david david  4096 May 13 13:44 src
+drwxrwxrwx 1 david david  4096 May 13 13:45 target

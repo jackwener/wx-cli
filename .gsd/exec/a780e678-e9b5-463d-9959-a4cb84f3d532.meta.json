@@ -1,0 +1,18 @@
+{
+  "id": "a780e678-e9b5-463d-9959-a4cb84f3d532",
+  "runtime": "bash",
+  "purpose": "run connection refused test",
+  "script_chars": 96,
+  "started_at": "2026-05-13T07:38:26.136Z",
+  "finished_at": "2026-05-13T07:38:28.985Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 2849,
+  "stdout_bytes": 175,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a780e678-e9b5-463d-9959-a4cb84f3d532.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a780e678-e9b5-463d-9959-a4cb84f3d532.stderr"
+}

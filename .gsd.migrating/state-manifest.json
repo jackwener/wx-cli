@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "exported_at": "2026-05-13T05:31:30.649Z",
+  "milestones": [
+    {
+      "id": "M001",
+      "title": "TCP Transport",
+      "status": "active",
+      "depends_on": [],
+      "created_at": "2026-05-13T05:31:30.629Z",
+      "completed_at": null,
+      "vision": "Add TCP socket transport to wx-cli's daemon communication layer with trait-based abstraction, enabling remote clients to query WeChat data over the network.",
+      "success_criteria": [],
+      "key_risks": [
+        {
+          "risk": "Windows named pipe refactoring may require interprocess crate API changes",
+          "whyItMatters": "interprocess crate API differs from std Unix sockets, may need adaptation for trait compatibility"
+        },
+        {
+          "risk": "Daemon start subcommand conflicts with existing auto-start behavior",
+          "whyItMatters": "Currently daemon auto-starts on first query via ensure_daemon(). New explicit start must coexist."
+        }
+      ],
+      "proof_strategy": [
+        {
+          "riskOrUnknown": "Windows named pipe trait compatibility with interprocess crate",
+          "retireIn": "S01",
+          "whatWillBeProven": "Transport traits work for Unix socket and named pipe"
+        },
+        {
+          "riskOrUnknown": "TCP bind and accept behavior on all platforms",
+          "retireIn": "S02",
+          "whatWillBeProven": "TCP listener accepts connections and handles requests correctly"
+        },
+        {
+          "riskOrUnknown": "Protocol works identically over TCP as over local transport",
+          "retireIn": "S04",
+          "whatWillBeProven": "End-to-end TCP communication returns correct results"
+        }
+      ],
+      "verification_contract": "- Contract verification: `cargo check` on all three targets, unit tests for protocol handling\n- Integration verification: Manual smoke test of CLI ↔ daemon over TCP on localhost\n- Operational verification: Daemon starts/stops cleanly with TCP, handles bind errors\n- UAT / human verification: Verify TCP results match local transport results",
+      "verification_integration": "Manual smoke test: daemon on TCP + client queries return same data as local transport",
+      "verification_operational": "Daemon starts with --tcp, binds to specified address, handles errors cleanly. Client connects via TCP, fails clearly on unreachable address.",
+      "verification_uat": "",
+      "definition_of_done": [
+        "All slice deliverables complete",
+        "Transport abstraction layer wired into daemon and client",
+        "cargo check passes on macOS, Linux, and Windows targets",
+        "Daemon can listen on local + TCP simultaneously",
+        "Client connects via TCP with --tcp, errors clearly on failure",
+        "wx daemon start subcommand works",
+        "Manual smoke test passes: CLI ↔ daemon over TCP on localhost",
+        "No regression to local-only transport"
+      ],
+      "requirement_coverage": "Covers: R001, R002, R003, R004, R005, R006, R007, R008\nPartially covers: none\nLeaves for later: R020 (TLS), R021 (Auth), R022 (Keepalive)\nOrphan risks: none",
+      "boundary_map_markdown": "Not provided.",
+      "sequence": 0
+    }
+  ],
+  "slices": [
+    {
+      "milestone_id": "M001",
+      "id": "S01",
+      "title": "Transport abstraction layer",
+      "status": "pending",
+      "risk": "high",
+      "depends": [],
+      "demo": "Refactor complete, `cargo check` passes on all platforms, existing behavior unchanged. Transport traits defined and implemented for Unix socket + Windows named pipe.",
+      "created_at": "2026-05-13T05:31:30.630Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Refactor transport layer into trait-based abstraction, eliminating platform-specific duplication. Implement Unix socket and Windows named pipe using new traits. Add `wx daemon start` subcommand.",
+      "success_criteria": "- `cargo check` passes on all three target platforms\n- Existing CLI commands work unchanged (no regression)\n- Transport traits (Listener, Connector) defined in `src/transport/traits.rs`\n- Protocol handling shared in `src/transport/protocol.rs`\n- `wx daemon start` subcommand exists and starts daemon",
+      "proof_level": "contract",
+      "integration_closure": "Daemon starts via `wx daemon start` and listens on local transport (Unix socket / named pipe). Client queries work via local transport as before.",
+      "observability_impact": "Daemon startup logs show which transports are active",
+      "sequence": 1,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    },
+    {
+      "milestone_id": "M001",
+      "id": "S02",
+      "title": "TCP server support",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S01"
+      ],
+      "demo": "`wx daemon start --tcp 127.0.0.1:9876` starts daemon listening on TCP port 9876",
+      "created_at": "2026-05-13T05:31:30.630Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement TCP server support. Add `--tcp` flag to daemon start. Daemon listens on local transport AND TCP simultaneously when --tcp is specified.",
+      "success_criteria": "- `wx daemon start --tcp 127.0.0.1:9876` starts daemon on both local and TCP\n- TCP connections accepted and handled correctly\n- TCP bind failure produces clear error message\n- `cargo check` passes on all platforms",
+      "proof_level": "contract",
+      "integration_closure": "Daemon accepts TCP connections. JSON-line protocol works over TCP. Bind errors are clear.",
+      "observability_impact": "Daemon logs show TCP bind address and accepted connections",
+      "sequence": 2,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    },
+    {
+      "milestone_id": "M001",
+      "id": "S03",
+      "title": "TCP client + global --tcp flag",
+      "status": "pending",
+      "risk": "medium",
+      "depends": [
+        "S01"
+      ],
+      "demo": "`wx sessions --tcp 127.0.0.1:9876` connects via TCP and returns session data",
+      "created_at": "2026-05-13T05:31:30.630Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "Implement TCP client support. Add global `--tcp host:port` flag to CLI. Client connects directly via TCP when flag is specified, with no local fallback.",
+      "success_criteria": "- `wx sessions --tcp 127.0.0.1:9876` connects via TCP and returns results\n- `wx sessions --tcp 127.0.0.1:9999` fails with clear error within 15s\n- `wx daemon status --tcp 127.0.0.1:9876` works over TCP\n- `wx daemon logs --tcp 127.0.0.1:9876` works over TCP\n- All commands without --tcp still work via local transport",
+      "proof_level": "contract",
+      "integration_closure": "Client connects via TCP to running daemon. All query commands work. Error messages clear on failure.",
+      "observability_impact": "Client error messages show TCP address when connection fails",
+      "sequence": 3,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    },
+    {
+      "milestone_id": "M001",
+      "id": "S04",
+      "title": "Integration smoke test",
+      "status": "pending",
+      "risk": "low",
+      "depends": [
+        "S02",
+        "S03"
+      ],
+      "demo": "Daemon on TCP + client queries return same data as local transport",
+      "created_at": "2026-05-13T05:31:30.630Z",
+      "completed_at": null,
+      "full_summary_md": "",
+      "full_uat_md": "",
+      "goal": "End-to-end integration verification. Daemon on TCP, client queries over TCP, results match local transport.",
+      "success_criteria": "- Manual smoke test: daemon started with --tcp, client queries over TCP\n- TCP and local transport return identical results\n- No regression to local-only mode\n- All cargo check targets pass",
+      "proof_level": "integration",
+      "integration_closure": "Full end-to-end: CLI ↔ daemon over TCP on localhost, same results as local transport.",
+      "observability_impact": "Observable end-to-end TCP communication between CLI and daemon",
+      "sequence": 4,
+      "replan_triggered_at": null,
+      "is_sketch": 0,
+      "sketch_scope": ""
+    }
+  ],
+  "tasks": [],
+  "decisions": [],
+  "verification_evidence": []
+}

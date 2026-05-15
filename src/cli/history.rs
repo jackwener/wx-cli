@@ -11,13 +11,14 @@ pub fn cmd_history(
     until: Option<String>,
     msg_type: Option<String>,
     json: bool,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
     let until_ts = until.as_deref().map(parse_time_end).transpose()?;
     let type_val = msg_type.as_deref().and_then(parse_msg_type);
 
     let req = Request::History { chat, limit, offset, since: since_ts, until: until_ts, msg_type: type_val };
-    let resp = transport::send(req)?;
+    let resp = transport::send(req, tcp_addr)?;
 
     let msgs = resp.data.get("messages")
         .cloned()

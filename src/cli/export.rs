@@ -10,6 +10,7 @@ pub fn cmd_export(
     limit: usize,
     format: String,
     output: Option<String>,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
     let until_ts = until.as_deref().map(parse_time_end).transpose()?;
@@ -23,7 +24,7 @@ pub fn cmd_export(
         msg_type: None,
     };
 
-    let resp = transport::send(req)?;
+    let resp = transport::send(req, tcp_addr)?;
     let messages = resp.data["messages"].as_array().cloned().unwrap_or_default();
     let chat_name = resp.data["chat"].as_str().unwrap_or("").to_string();
     let is_group = resp.data["is_group"].as_bool().unwrap_or(false);

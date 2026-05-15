@@ -1,0 +1,18 @@
+{
+  "id": "75341ebb-ee4a-475f-b5be-53d0b3ab4378",
+  "runtime": "bash",
+  "purpose": "Cross-compile check Windows MSVC",
+  "script_chars": 58,
+  "started_at": "2026-05-13T06:49:43.870Z",
+  "finished_at": "2026-05-13T06:49:57.396Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 13526,
+  "stdout_bytes": 101,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\75341ebb-ee4a-475f-b5be-53d0b3ab4378.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\75341ebb-ee4a-475f-b5be-53d0b3ab4378.stderr"
+}

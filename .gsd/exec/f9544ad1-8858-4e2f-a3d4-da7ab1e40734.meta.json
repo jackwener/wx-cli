@@ -1,0 +1,18 @@
+{
+  "id": "f9544ad1-8858-4e2f-a3d4-da7ab1e40734",
+  "runtime": "bash",
+  "purpose": "Check test structure and binary path",
+  "script_chars": 619,
+  "started_at": "2026-05-13T06:29:05.117Z",
+  "finished_at": "2026-05-13T06:29:35.152Z",
+  "exit_code": null,
+  "signal": "SIGKILL",
+  "timed_out": true,
+  "duration_ms": 30035,
+  "stdout_bytes": 20,
+  "stderr_bytes": 151,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\f9544ad1-8858-4e2f-a3d4-da7ab1e40734.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\f9544ad1-8858-4e2f-a3d4-da7ab1e40734.stderr"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "3c257b4d-cb10-4f2f-805f-9c6f8899a3eb",
+  "runtime": "bash",
+  "purpose": "Search for S03-PLAN.md across project",
+  "script_chars": 116,
+  "started_at": "2026-05-13T06:21:52.251Z",
+  "finished_at": "2026-05-13T06:22:00.307Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 8056,
+  "stdout_bytes": 196,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\3c257b4d-cb10-4f2f-805f-9c6f8899a3eb.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\3c257b4d-cb10-4f2f-805f-9c6f8899a3eb.stderr"
+}

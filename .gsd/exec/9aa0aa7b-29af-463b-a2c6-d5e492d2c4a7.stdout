@@ -1,0 +1,10 @@
+  ARFLAGS_x86_64_pc_windows_msvc = None
+  cargo:rerun-if-env-changed=ARFLAGS_x86_64-pc-windows-msvc
+  ARFLAGS_x86_64-pc-windows-msvc = None
+
+  --- stderr
+
+
+  error occurred in cc-rs: failed to find tool "lib.exe": No such file or directory (os error 2)
+
+

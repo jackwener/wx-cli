@@ -1,0 +1,18 @@
+{
+  "id": "873bcef3-9547-4125-8b5e-d842b3960676",
+  "runtime": "bash",
+  "purpose": "Read CLI module files",
+  "script_chars": 187,
+  "started_at": "2026-05-13T06:00:47.180Z",
+  "finished_at": "2026-05-13T06:00:47.370Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 190,
+  "stdout_bytes": 20659,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\873bcef3-9547-4125-8b5e-d842b3960676.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\873bcef3-9547-4125-8b5e-d842b3960676.stderr"
+}

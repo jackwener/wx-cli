@@ -1,0 +1,69 @@
+Tables: ['schema_version', 'decisions', 'sqlite_sequence', 'requirements', 'artifacts', 'memories', 'memory_processed_units', 'memory_sources', 'memory_embeddings', 'memory_relations', 'memories_fts', 'memories_fts_data', 'memories_fts_idx', 'memories_fts_docsize', 'memories_fts_config', 'milestones', 'slices', 'tasks', 'verification_evidence', 'replan_history', 'assessments', 'quality_gates', 'slice_dependencies', 'gate_runs', 'turn_git_transactions', 'milestone_commit_attributions', 'audit_events', 'audit_turn_index', 'workers', 'milestone_leases', 'unit_dispatches', 'cancellation_requests', 'command_queue', 'runtime_kv']
+
+schema_version: [('version', 'INTEGER'), ('applied_at', 'TEXT')]
+
+decisions: [('seq', 'INTEGER'), ('id', 'TEXT'), ('when_context', 'TEXT'), ('scope', 'TEXT'), ('decision', 'TEXT'), ('choice', 'TEXT'), ('rationale', 'TEXT'), ('revisable', 'TEXT'), ('made_by', 'TEXT'), ('source', 'TEXT'), ('superseded_by', 'TEXT')]
+
+sqlite_sequence: [('name', ''), ('seq', '')]
+
+requirements: [('id', 'TEXT'), ('class', 'TEXT'), ('status', 'TEXT'), ('description', 'TEXT'), ('why', 'TEXT'), ('source', 'TEXT'), ('primary_owner', 'TEXT'), ('supporting_slices', 'TEXT'), ('validation', 'TEXT'), ('notes', 'TEXT'), ('full_content', 'TEXT'), ('superseded_by', 'TEXT')]
+
+artifacts: [('path', 'TEXT'), ('artifact_type', 'TEXT'), ('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('task_id', 'TEXT'), ('full_content', 'TEXT'), ('imported_at', 'TEXT'), ('content_hash', 'TEXT')]
+
+memories: [('seq', 'INTEGER'), ('id', 'TEXT'), ('category', 'TEXT'), ('content', 'TEXT'), ('confidence', 'REAL'), ('source_unit_type', 'TEXT'), ('source_unit_id', 'TEXT'), ('created_at', 'TEXT'), ('updated_at', 'TEXT'), ('superseded_by', 'TEXT'), ('hit_count', 'INTEGER'), ('scope', 'TEXT'), ('tags', 'TEXT'), ('structured_fields', 'TEXT'), ('last_hit_at', 'TEXT')]
+
+memory_processed_units: [('unit_key', 'TEXT'), ('activity_file', 'TEXT'), ('processed_at', 'TEXT')]
+
+memory_sources: [('id', 'TEXT'), ('kind', 'TEXT'), ('uri', 'TEXT'), ('title', 'TEXT'), ('content', 'TEXT'), ('content_hash', 'TEXT'), ('imported_at', 'TEXT'), ('scope', 'TEXT'), ('tags', 'TEXT')]
+
+memory_embeddings: [('memory_id', 'TEXT'), ('model', 'TEXT'), ('dim', 'INTEGER'), ('vector', 'BLOB'), ('updated_at', 'TEXT')]
+
+memory_relations: [('from_id', 'TEXT'), ('to_id', 'TEXT'), ('rel', 'TEXT'), ('confidence', 'REAL'), ('created_at', 'TEXT')]
+
+memories_fts: [('content', '')]
+
+memories_fts_data: [('id', 'INTEGER'), ('block', 'BLOB')]
+
+memories_fts_idx: [('segid', ''), ('term', ''), ('pgno', '')]
+
+memories_fts_docsize: [('id', 'INTEGER'), ('sz', 'BLOB')]
+
+memories_fts_config: [('k', ''), ('v', '')]
+
+milestones: [('id', 'TEXT'), ('title', 'TEXT'), ('status', 'TEXT'), ('depends_on', 'TEXT'), ('created_at', 'TEXT'), ('completed_at', 'TEXT'), ('vision', 'TEXT'), ('success_criteria', 'TEXT'), ('key_risks', 'TEXT'), ('proof_strategy', 'TEXT'), ('verification_contract', 'TEXT'), ('verification_integration', 'TEXT'), ('verification_operational', 'TEXT'), ('verification_uat', 'TEXT'), ('definition_of_done', 'TEXT'), ('requirement_coverage', 'TEXT'), ('boundary_map_markdown', 'TEXT'), ('sequence', 'INTEGER')]
+
+slices: [('milestone_id', 'TEXT'), ('id', 'TEXT'), ('title', 'TEXT'), ('status', 'TEXT'), ('risk', 'TEXT'), ('depends', 'TEXT'), ('demo', 'TEXT'), ('created_at', 'TEXT'), ('completed_at', 'TEXT'), ('full_summary_md', 'TEXT'), ('full_uat_md', 'TEXT'), ('goal', 'TEXT'), ('success_criteria', 'TEXT'), ('proof_level', 'TEXT'), ('integration_closure', 'TEXT'), ('observability_impact', 'TEXT'), ('sequence', 'INTEGER'), ('replan_triggered_at', 'TEXT'), ('is_sketch', 'INTEGER'), ('sketch_scope', 'TEXT')]
+
+tasks: [('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('id', 'TEXT'), ('title', 'TEXT'), ('status', 'TEXT'), ('one_liner', 'TEXT'), ('narrative', 'TEXT'), ('verification_result', 'TEXT'), ('duration', 'TEXT'), ('completed_at', 'TEXT'), ('blocker_discovered', 'INTEGER'), ('blocker_source', 'TEXT'), ('escalation_pending', 'INTEGER'), ('escalation_awaiting_review', 'INTEGER'), ('escalation_artifact_path', 'TEXT'), ('escalation_override_applied_at', 'TEXT'), ('deviations', 'TEXT'), ('known_issues', 'TEXT'), ('key_files', 'TEXT'), ('key_decisions', 'TEXT'), ('full_summary_md', 'TEXT'), ('description', 'TEXT'), ('estimate', 'TEXT'), ('files', 'TEXT'), ('verify', 'TEXT'), ('inputs', 'TEXT'), ('expected_output', 'TEXT'), ('observability_impact', 'TEXT'), ('full_plan_md', 'TEXT'), ('sequence', 'INTEGER')]
+
+verification_evidence: [('id', 'INTEGER'), ('task_id', 'TEXT'), ('slice_id', 'TEXT'), ('milestone_id', 'TEXT'), ('command', 'TEXT'), ('exit_code', 'INTEGER'), ('verdict', 'TEXT'), ('duration_ms', 'INTEGER'), ('created_at', 'TEXT')]
+
+replan_history: [('id', 'INTEGER'), ('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('task_id', 'TEXT'), ('summary', 'TEXT'), ('previous_artifact_path', 'TEXT'), ('replacement_artifact_path', 'TEXT'), ('created_at', 'TEXT')]
+
+assessments: [('path', 'TEXT'), ('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('task_id', 'TEXT'), ('status', 'TEXT'), ('scope', 'TEXT'), ('full_content', 'TEXT'), ('created_at', 'TEXT')]
+
+quality_gates: [('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('gate_id', 'TEXT'), ('scope', 'TEXT'), ('task_id', 'TEXT'), ('status', 'TEXT'), ('verdict', 'TEXT'), ('rationale', 'TEXT'), ('findings', 'TEXT'), ('evaluated_at', 'TEXT')]
+
+slice_dependencies: [('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('depends_on_slice_id', 'TEXT')]
+
+gate_runs: [('id', 'INTEGER'), ('trace_id', 'TEXT'), ('turn_id', 'TEXT'), ('gate_id', 'TEXT'), ('gate_type', 'TEXT'), ('unit_type', 'TEXT'), ('unit_id', 'TEXT'), ('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('task_id', 'TEXT'), ('outcome', 'TEXT'), ('failure_class', 'TEXT'), ('rationale', 'TEXT'), ('findings', 'TEXT'), ('attempt', 'INTEGER'), ('max_attempts', 'INTEGER'), ('retryable', 'INTEGER'), ('evaluated_at', 'TEXT')]
+
+turn_git_transactions: [('trace_id', 'TEXT'), ('turn_id', 'TEXT'), ('unit_type', 'TEXT'), ('unit_id', 'TEXT'), ('stage', 'TEXT'), ('action', 'TEXT'), ('push', 'INTEGER'), ('status', 'TEXT'), ('error', 'TEXT'), ('metadata_json', 'TEXT'), ('updated_at', 'TEXT')]
+
+milestone_commit_attributions: [('commit_sha', 'TEXT'), ('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('task_id', 'TEXT'), ('source', 'TEXT'), ('confidence', 'REAL'), ('files_json', 'TEXT'), ('created_at', 'TEXT')]
+
+audit_events: [('event_id', 'TEXT'), ('trace_id', 'TEXT'), ('turn_id', 'TEXT'), ('caused_by', 'TEXT'), ('category', 'TEXT'), ('type', 'TEXT'), ('ts', 'TEXT'), ('payload_json', 'TEXT')]
+
+audit_turn_index: [('trace_id', 'TEXT'), ('turn_id', 'TEXT'), ('first_ts', 'TEXT'), ('last_ts', 'TEXT'), ('event_count', 'INTEGER')]
+
+workers: [('worker_id', 'TEXT'), ('host', 'TEXT'), ('pid', 'INTEGER'), ('started_at', 'TEXT'), ('version', 'TEXT'), ('last_heartbeat_at', 'TEXT'), ('status', 'TEXT'), ('project_root_realpath', 'TEXT')]
+
+milestone_leases: [('milestone_id', 'TEXT'), ('worker_id', 'TEXT'), ('fencing_token', 'INTEGER'), ('acquired_at', 'TEXT'), ('expires_at', 'TEXT'), ('status', 'TEXT')]
+
+unit_dispatches: [('id', 'INTEGER'), ('trace_id', 'TEXT'), ('turn_id', 'TEXT'), ('worker_id', 'TEXT'), ('milestone_lease_token', 'INTEGER'), ('milestone_id', 'TEXT'), ('slice_id', 'TEXT'), ('task_id', 'TEXT'), ('unit_type', 'TEXT'), ('unit_id', 'TEXT'), ('status', 'TEXT'), ('attempt_n', 'INTEGER'), ('started_at', 'TEXT'), ('ended_at', 'TEXT'), ('exit_reason', 'TEXT'), ('error_summary', 'TEXT'), ('verification_evidence_id', 'INTEGER'), ('next_run_at', 'TEXT'), ('retry_after_ms', 'INTEGER'), ('max_attempts', 'INTEGER'), ('last_error_code', 'TEXT'), ('last_error_at', 'TEXT')]
+
+cancellation_requests: [('id', 'INTEGER'), ('requested_at', 'TEXT'), ('requested_by', 'TEXT'), ('scope', 'TEXT'), ('scope_id', 'TEXT'), ('dispatch_id', 'INTEGER'), ('reason', 'TEXT'), ('status', 'TEXT'), ('acked_at', 'TEXT'), ('acked_worker_id', 'TEXT')]
+
+command_queue: [('id', 'INTEGER'), ('target_worker', 'TEXT'), ('command', 'TEXT'), ('args_json', 'TEXT'), ('enqueued_at', 'TEXT'), ('claimed_at', 'TEXT'), ('claimed_by', 'TEXT'), ('completed_at', 'TEXT'), ('result_json', 'TEXT')]
+
+runtime_kv: [('scope', 'TEXT'), ('scope_id', 'TEXT'), ('key', 'TEXT'), ('value_json', 'TEXT'), ('updated_at', 'TEXT')]

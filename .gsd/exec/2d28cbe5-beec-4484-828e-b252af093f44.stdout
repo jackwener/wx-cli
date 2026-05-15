@@ -1,0 +1,20 @@
+     Running unittests src/main.rs (target/debug/deps/wx-485d0482e3ff8755)
+
+running 1 test
+
+thread 'cli::transport::integration_tests::test_send_tcp_round_trip' (1760) panicked at src/cli/transport.rs:374:81:
+called `Result::unwrap()` on an `Err` value: 连接 TCP daemon (127.0.0.1:45285) 失败
+
+Caused by:
+    connection timed out
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test cli::transport::integration_tests::test_send_tcp_round_trip ... FAILED
+
+failures:
+
+failures:
+    cli::transport::integration_tests::test_send_tcp_round_trip
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 37 filtered out; finished in 15.03s
+
+error: test failed, to rerun pass `--bin wx`

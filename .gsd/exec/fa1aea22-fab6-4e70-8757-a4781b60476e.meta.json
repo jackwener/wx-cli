@@ -1,0 +1,18 @@
+{
+  "id": "fa1aea22-fab6-4e70-8757-a4781b60476e",
+  "runtime": "bash",
+  "purpose": "S02: Windows cross-compile check",
+  "script_chars": 59,
+  "started_at": "2026-05-13T06:12:57.511Z",
+  "finished_at": "2026-05-13T06:14:13.741Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 76230,
+  "stdout_bytes": 255,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\fa1aea22-fab6-4e70-8757-a4781b60476e.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\fa1aea22-fab6-4e70-8757-a4781b60476e.stderr"
+}

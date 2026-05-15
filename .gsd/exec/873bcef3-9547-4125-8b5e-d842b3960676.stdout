@@ -1,0 +1,637 @@
+=== src/cli/mod.rs ===
+mod init;
+pub mod sessions;
+pub mod history;
+pub mod search;
+pub mod contacts;
+pub mod export;
+pub mod daemon_cmd;
+pub mod transport;
+pub mod output;
+pub mod unread;
+pub mod members;
+pub mod new_messages;
+pub mod stats;
+pub mod favorites;
+pub mod sns_notifications;
+pub mod sns_feed;
+pub mod sns_search;
+
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+
+/// wx — 微信本地数据 CLI
+#[derive(Parser)]
+#[command(name = "wx", version = env!("CARGO_PKG_VERSION"), about = "wx — 微信本地数据 CLI")]
+pub struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// 初始化：检测数据目录并扫描加密密钥
+    Init {
+        /// 强制重新扫描（覆盖已有配置）
+        #[arg(long)]
+        force: bool,
+    },
+    /// 列出最近会话
+    Sessions {
+        /// 会话数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 查看聊天记录
+    History {
+        /// 聊天对象名称（支持模糊匹配）
+        chat: String,
+        /// 消息数量
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// 分页偏移
+        #[arg(long, default_value = "0")]
+        offset: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 消息类型过滤 [text|image|voice|video|sticker|location|link|file|call|system]
+        #[arg(long = "type", value_name = "TYPE",
+              value_parser = ["text","image","voice","video","sticker","location","link","file","call","system"])]
+        msg_type: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 搜索消息
+    Search {
+        /// 搜索关键词
+        keyword: String,
+        /// 限定聊天（可多次指定）
+        #[arg(long = "in", value_name = "CHAT")]
+        chats: Vec<String>,
+        /// 结果数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 消息类型过滤 [text|image|voice|video|sticker|location|link|file|call|system]
+        #[arg(long = "type", value_name = "TYPE",
+              value_parser = ["text","image","voice","video","sticker","location","link","file","call","system"])]
+        msg_type: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 查看联系人
+    Contacts {
+        /// 按名字过滤
+        #[arg(short = 'q', long)]
+        query: Option<String>,
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 导出聊天记录到文件
+    Export {
+        /// 聊天对象名称
+        chat: String,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 最多导出条数
+        #[arg(short = 'n', long, default_value = "500")]
+        limit: usize,
+        /// 输出格式 [markdown|txt|json|yaml]
+        #[arg(short = 'f', long, default_value = "markdown", value_parser = ["markdown", "txt", "json", "yaml"])]
+        format: String,
+        /// 输出文件（默认 stdout）
+        #[arg(short = 'o', long)]
+        output: Option<String>,
+    },
+    /// 显示有未读消息的会话
+    Unread {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 按会话类型过滤，逗号分隔。示例：--filter private,group 只看真人的未读
+        #[arg(long, value_name = "TYPES", value_delimiter = ',',
+              value_parser = ["all", "private", "group", "official", "folded"])]
+        filter: Vec<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 查看群成员
+    Members {
+        /// 群聊名称（支持模糊匹配）
+        chat: String,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 获取自上次检查以来的新消息
+    NewMessages {
+        /// 显示数量上限
+        #[arg(short = 'n', long, default_value = "200")]
+        limit: usize,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 聊天统计分析
+    Stats {
+        /// 聊天对象名称（支持模糊匹配）
+        chat: String,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 查看微信收藏内容
+    Favorites {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// 类型过滤 [text|image|article|card|video]
+        #[arg(long = "type", value_name = "TYPE",
+              value_parser = ["text","image","article","card","video"])]
+        fav_type: Option<String>,
+        /// 内容关键词搜索
+        #[arg(short = 'q', long)]
+        query: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 朋友圈互动通知：别人对我的朋友圈点赞/评论 + 我评过的帖子下的跟帖
+    SnsNotifications {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 包含已读通知（默认仅未读）
+        #[arg(long)]
+        include_read: bool,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 朋友圈时间线：按时间/作者筛选本地缓存的朋友圈
+    SnsFeed {
+        /// 显示数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 只看指定作者（昵称 / 备注名 / 微信 ID，模糊匹配）
+        #[arg(long)]
+        user: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 朋友圈全文搜索：匹配正文关键词
+    SnsSearch {
+        /// 关键词
+        keyword: String,
+        /// 结果数量
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+        /// 起始时间 YYYY-MM-DD
+        #[arg(long)]
+        since: Option<String>,
+        /// 结束时间 YYYY-MM-DD
+        #[arg(long)]
+        until: Option<String>,
+        /// 限定作者（昵称 / 备注名 / 微信 ID）
+        #[arg(long)]
+        user: Option<String>,
+        /// 输出 JSON（默认 YAML）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 管理 wx-daemon
+    Daemon {
+        #[command(subcommand)]
+        cmd: DaemonCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCommands {
+    /// 查看 daemon 运行状态
+    Status,
+    /// 停止 daemon
+    Stop,
+    /// 查看 daemon 日志
+    Logs {
+        /// 持续输出（tail -f）
+        #[arg(short = 'f', long)]
+        follow: bool,
+        /// 显示最近 N 行
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
+    /// 启动 daemon
+    Start {
+        /// 同时监听 TCP 地址（如 127.0.0.1:9876）
+        #[arg(long)]
+        tcp: Option<String>,
+    },
+}
+
+pub fn run() {
+    let cli = Cli::parse();
+    if let Err(e) = dispatch(cli) {
+        eprintln!("错误: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn dispatch(cli: Cli) -> Result<()> {
+    match cli.command {
+        Commands::Init { force } => init::cmd_init(force),
+        Commands::Sessions { limit, json } => sessions::cmd_sessions(limit, json),
+        Commands::History { chat, limit, offset, since, until, msg_type, json } => {
+            history::cmd_history(chat, limit, offset, since, until, msg_type, json)
+        }
+        Commands::Search { keyword, chats, limit, since, until, msg_type, json } => {
+            search::cmd_search(keyword, chats, limit, since, until, msg_type, json)
+        }
+        Commands::Contacts { query, limit, json } => contacts::cmd_contacts(query, limit, json),
+        Commands::Export { chat, since, until, limit, format, output } => {
+            export::cmd_export(chat, since, until, limit, format, output)
+        }
+        Commands::Unread { limit, filter, json } => unread::cmd_unread(limit, filter, json),
+        Commands::Members { chat, json } => members::cmd_members(chat, json),
+        Commands::NewMessages { limit, json } => new_messages::cmd_new_messages(limit, json),
+        Commands::Stats { chat, since, until, json } => {
+            stats::cmd_stats(chat, since, until, json)
+        }
+        Commands::Favorites { limit, fav_type, query, json } => {
+            favorites::cmd_favorites(limit, fav_type, query, json)
+        }
+        Commands::SnsNotifications { limit, since, until, include_read, json } => {
+            sns_notifications::cmd_sns_notifications(limit, since, until, include_read, json)
+        }
+        Commands::SnsFeed { limit, since, until, user, json } => {
+            sns_feed::cmd_sns_feed(limit, since, until, user, json)
+        }
+        Commands::SnsSearch { keyword, limit, since, until, user, json } => {
+            sns_search::cmd_sns_search(keyword, limit, since, until, user, json)
+        }
+        Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd),
+    }
+}
+
+=== src/cli/transport.rs ===
+use anyhow::{bail, Context, Result};
+use std::io::{BufRead, BufReader, Write};
+use std::time::Duration;
+
+use crate::config;
+use crate::ipc::{Request, Response};
+
+const STARTUP_TIMEOUT_SECS: u64 = 15;
+
+/// 检查 daemon 是否存活
+pub fn is_alive() -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        let sock_path = config::sock_path();
+        if !sock_path.exists() {
+            return false;
+        }
+        let mut stream = match UnixStream::connect(&sock_path) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
+        stream.set_write_timeout(Some(Duration::from_secs(2))).ok();
+
+        let req = serde_json::json!({"cmd": "ping"});
+        if write!(stream, "{}\n", req).is_err() {
+            return false;
+        }
+        let mut line = String::new();
+        let mut reader = BufReader::new(&stream);
+        if reader.read_line(&mut line).is_err() {
+            return false;
+        }
+        serde_json::from_str::<serde_json::Value>(&line)
+            .ok()
+            .and_then(|v| v.get("pong").and_then(|p| p.as_bool()))
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        use interprocess::local_socket::{prelude::*, GenericNamespaced, Stream};
+        // 必须用 interprocess 自己的连接 API，和 server 保持一致
+        match "wx-cli-daemon".to_ns_name::<GenericNamespaced>() {
+            Ok(name) => Stream::connect(name).is_ok(),
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
+}
+
+/// 确保 daemon 运行，必要时自动启动
+pub fn ensure_daemon() -> Result<()> {
+    if is_alive() {
+        return Ok(());
+    }
+    eprintln!("启动 wx-daemon...");
+    start_daemon()?;
+    Ok(())
+}
+
+/// 启动 daemon 前检查 `~/.wx-cli/` 可写，给出比"超时"更明确的错误。
+///
+/// 典型坑：旧版本 `sudo wx init` 把目录留成 root 属主，非 root 的 daemon
+/// 连 socket/log 都建不了，会静默失败 15s 超时。
+fn preflight_cli_dir_writable() -> Result<()> {
+    let cli_dir = config::cli_dir();
+    std::fs::create_dir_all(&cli_dir)
+        .with_context(|| format!("创建 {} 失败", cli_dir.display()))?;
+
+    let probe = cli_dir.join(".daemon_probe");
+    match std::fs::File::create(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            let dir = cli_dir.display();
+            if cfg!(unix) {
+                bail!(
+                    "无法写入 {dir}（权限不足）\n\n\
+                     这通常是老版本的 `sudo wx init` 把目录属主留成了 root。\n\
+                     修复：\n\n    \
+                     sudo chown -R $(whoami) {dir}\n\n\
+                     （新版已修复此问题，下次 init 不会再发生）",
+                )
+            } else {
+                bail!("无法写入 {dir}: {e}")
+            }
+        }
+        Err(e) => bail!("无法写入 {}: {}", cli_dir.display(), e),
+    }
+}
+
+/// 启动 daemon 进程（自身二进制，设置 WX_DAEMON_MODE=1）
+fn start_daemon() -> Result<()> {
+    let exe = std::env::current_exe().context("无法获取当前可执行文件路径")?;
+
+    // 预检：当前用户是否能写 ~/.wx-cli/。如果不能，给出可操作的错误信息，
+    // 而不是 spawn 一个注定失败的 daemon 然后超时 15s。
+    preflight_cli_dir_writable()?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // 日志文件：~/.wx-cli/daemon.log
+        let log_path = config::log_path();
+        // 确保父目录存在
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let (stdout_stdio, stderr_stdio) = std::fs::OpenOptions::new()
+            .create(true).append(true)
+            .open(&log_path)
+            .and_then(|f| f.try_clone().map(|g| (f, g)))
+            .map(|(f, g)| (std::process::Stdio::from(f), std::process::Stdio::from(g)))
+            .unwrap_or_else(|_| (std::process::Stdio::null(), std::process::Stdio::null()));
+        let mut cmd = std::process::Command::new(&exe);
+        cmd.env("WX_DAEMON_MODE", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(stdout_stdio)
+            .stderr(stderr_stdio);
+        // SAFETY: setsid() 在 fork 后的子进程中调用，使 daemon 脱离控制终端
+        unsafe { cmd.pre_exec(|| { libc::setsid(); Ok(()) }); }
+        let _ = cmd.spawn().context("无法启动 daemon 进程")?;
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let log_path = config::log_path();
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let (stdout_stdio, stderr_stdio) = std::fs::OpenOptions::new()
+            .create(true).append(true)
+            .open(&log_path)
+            .and_then(|f| f.try_clone().map(|g| (f, g)))
+            .map(|(f, g)| (std::process::Stdio::from(f), std::process::Stdio::from(g)))
+            .unwrap_or_else(|_| (std::process::Stdio::null(), std::process::Stdio::null()));
+        let _ = std::process::Command::new(&exe)
+            .env("WX_DAEMON_MODE", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(stdout_stdio)
+            .stderr(stderr_stdio)
+            .creation_flags(0x00000008) // DETACHED_PROCESS
+            .spawn()
+            .context("无法启动 daemon 进程")?;
+    }
+
+    // 等待 daemon 就绪（最多 STARTUP_TIMEOUT_SECS 秒）
+    let deadline = std::time::Instant::now() + Duration::from_secs(STARTUP_TIMEOUT_SECS);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(300));
+        if is_alive() {
+            return Ok(());
+        }
+    }
+
+    bail!(
+        "wx-daemon 启动超时（>{}s）\n请查看日志: {}",
+        STARTUP_TIMEOUT_SECS,
+        config::log_path().display()
+    )
+}
+
+/// 向 daemon 发送请求并返回响应
+pub fn send(req: Request) -> Result<Response> {
+    ensure_daemon()?;
+
+    #[cfg(unix)]
+    {
+        send_unix(req)
+    }
+    #[cfg(windows)]
+    {
+        send_windows(req)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        bail!("不支持当前平台")
+    }
+}
+
+#[cfg(unix)]
+fn send_unix(req: Request) -> Result<Response> {
+    use std::os::unix::net::UnixStream;
+    let sock_path = config::sock_path();
+    let mut stream = UnixStream::connect(&sock_path)
+        .context("连接 daemon socket 失败")?;
+    stream.set_read_timeout(Some(Duration::from_secs(120))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(120))).ok();
+
+    let req_str = serde_json::to_string(&req)? + "\n";
+    stream.write_all(req_str.as_bytes())?;
+
+    let mut line = String::new();
+    let mut reader = BufReader::new(&stream);
+    reader.read_line(&mut line)?;
+
+    let resp: Response = serde_json::from_str(&line)
+        .context("解析 daemon 响应失败")?;
+
+    if !resp.ok {
+        bail!("{}", resp.error.as_deref().unwrap_or("未知错误"));
+    }
+
+    Ok(resp)
+}
+
+#[cfg(windows)]
+fn send_windows(req: Request) -> Result<Response> {
+    use interprocess::local_socket::{prelude::*, GenericNamespaced, Stream};
+
+    let name = "wx-cli-daemon".to_ns_name::<GenericNamespaced>()
+        .context("构造 pipe name 失败")?;
+    let stream = Stream::connect(name)
+        .context("连接 daemon named pipe 失败")?;
+
+    // interprocess::Stream 同时实现 Read + Write，但需要拆分读写端
+    let mut reader = BufReader::new(stream);
+
+    let req_str = serde_json::to_string(&req)? + "\n";
+    reader.get_mut().write_all(req_str.as_bytes())?;
+
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+
+    let resp: Response = serde_json::from_str(&line)
+        .context("解析 daemon 响应失败")?;
+
+    if !resp.ok {
+        bail!("{}", resp.error.as_deref().unwrap_or("未知错误"));
+    }
+
+    Ok(resp)
+}
+
+=== Cargo.toml ===
+[package]
+name = "wx-cli"
+version = "0.1.10"
+edition = "2021"
+description = "WeChat 4.x (macOS/Linux) local data CLI — decrypt SQLCipher DBs, query chat history, watch new messages"
+license = "Apache-2.0"
+repository = "https://github.com/jackwener/wx-cli"
+keywords = ["wechat", "sqlcipher", "decrypt", "cli"]
+categories = ["command-line-utilities"]
+readme = "README.md"
+
+[[bin]]
+name = "wx"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# 异步
+tokio = { version = "1", features = ["full"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "=1.0.140"
+serde_yaml = "0.9"
+
+# SQLite
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# 加密
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+hmac = "0.12"
+sha2 = "0.10"
+pbkdf2 = "0.12"
+
+# 解压
+zstd = "0.13"
+
+# 错误处理
+anyhow = "1"
+
+# 时间
+chrono = { version = "0.4", features = ["serde"] }
+
+# 跨平台路径
+dirs = "5"
+
+# MD5 (联系人表名 Msg_<md5>)
+md5 = "0.7"
+
+# 正则表达式
+regex = "1"
+roxmltree = "0.20"
+
+# IPC Windows named pipe（Unix 直接用 tokio::net::UnixListener）
+[target.'cfg(windows)'.dependencies]
+interprocess = { version = "2", features = ["tokio"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Memory",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

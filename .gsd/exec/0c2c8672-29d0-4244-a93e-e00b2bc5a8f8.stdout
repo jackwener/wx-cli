@@ -1,0 +1,37 @@
+=== DAEMON START HELP ===
+warning: unused config key `net.timeout` in `/mnt/c/Users/david/.cargo/config.toml`
+warning: unused config key `http.low-speed-timeout` in `/mnt/c/Users/david/.cargo/config.toml`
+warning: unused import: `bail`
+ --> src/scanner/linux.rs:6:14
+  |
+6 | use anyhow::{bail, Context, Result};
+  |              ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wx-cli` (bin "wx") generated 1 warning (run `cargo fix --bin "wx" -p wx-cli` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.70s
+     Running `target/debug/wx daemon start --help`
+启动 daemon
+
+Usage: wx daemon start [OPTIONS]
+
+Options:
+      --tcp <TCP>  同时监听 TCP 地址（如 127.0.0.1:9876）
+  -h, --help       Print help
+=== TEST COUNT ===
+test transport::tests::transport_addr_variants ... ok
+test transport::tests::tcp_listener_implements_listener ... ok
+test scanner::tests::test_collect_db_salts_ignores_non_db_extensions ... ok
+test scanner::tests::test_collect_db_salts_multiple_files_unique_salts ... ok
+test scanner::tests::test_collect_db_salts_skips_plaintext_sqlite ... ok
+test scanner::tests::test_collect_db_salts_recursive ... ok
+test scanner::tests::test_read_db_salt_encrypted ... ok
+test scanner::tests::test_read_db_salt_exactly_16_bytes ... ok
+test scanner::tests::test_read_db_salt_plaintext_sqlite ... ok
+test scanner::tests::test_read_db_salt_too_short ... ok
+test scanner::tests::test_collect_db_salts_empty_dir ... ok
+test scanner::tests::test_collect_db_salts_finds_encrypted ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

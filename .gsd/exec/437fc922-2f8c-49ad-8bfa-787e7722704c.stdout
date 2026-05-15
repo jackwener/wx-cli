@@ -1,0 +1,5 @@
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wx-cli` (bin "wx") generated 1 warning (run `cargo fix --bin "wx" -p wx-cli` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.56s

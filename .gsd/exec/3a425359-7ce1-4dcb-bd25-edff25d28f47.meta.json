@@ -1,0 +1,18 @@
+{
+  "id": "3a425359-7ce1-4dcb-bd25-edff25d28f47",
+  "runtime": "bash",
+  "purpose": "Check for integration test infrastructure",
+  "script_chars": 314,
+  "started_at": "2026-05-13T06:19:43.644Z",
+  "finished_at": "2026-05-13T06:19:51.740Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 8096,
+  "stdout_bytes": 1752,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\3a425359-7ce1-4dcb-bd25-edff25d28f47.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\3a425359-7ce1-4dcb-bd25-edff25d28f47.stderr"
+}

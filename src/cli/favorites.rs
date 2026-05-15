@@ -19,9 +19,10 @@ pub fn cmd_favorites(
     fav_type: Option<String>,
     query: Option<String>,
     json: bool,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let type_val = fav_type.as_deref().and_then(parse_fav_type);
-    let resp = transport::send(Request::Favorites { limit, fav_type: type_val, query })?;
+    let resp = transport::send(Request::Favorites { limit, fav_type: type_val, query }, tcp_addr)?;
     let items = resp.data.get("items")
         .cloned()
         .unwrap_or(serde_json::Value::Array(vec![]));

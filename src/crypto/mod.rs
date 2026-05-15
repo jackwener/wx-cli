@@ -6,6 +6,7 @@ use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use cbc::Decryptor;
 use std::io::{Read, Write};
 use std::path::Path;
+use tracing::debug;
 
 type Block = aes::cipher::Block<Aes256>;
 
@@ -73,6 +74,7 @@ fn aes_cbc_decrypt(key: &[u8; 32], iv: &[u8; 16], data: &[u8]) -> Result<Vec<u8>
 /// 完整解密一个 SQLCipher 数据库文件（流式，逐页读写避免全量载入内存）
 ///
 /// 读取 `db_path`，按 PAGE_SZ 分页解密，写入 `out_path`
+#[tracing::instrument(name = "crypto.decrypt", skip(enc_key), fields(db = %db_path.display(), pages))]
 pub fn full_decrypt(db_path: &Path, out_path: &Path, enc_key: &[u8; 32]) -> Result<()> {
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -87,6 +89,8 @@ pub fn full_decrypt(db_path: &Path, out_path: &Path, enc_key: &[u8; 32]) -> Resu
     let mut output = std::fs::File::create(out_path)?;
     let total_pages = (file_size + PAGE_SZ - 1) / PAGE_SZ;
     let mut page_buf = vec![0u8; PAGE_SZ];
+
+    debug!(total_pages, "开始解密");
 
     for pgno in 1..=total_pages {
         let page_start = (pgno - 1) * PAGE_SZ;

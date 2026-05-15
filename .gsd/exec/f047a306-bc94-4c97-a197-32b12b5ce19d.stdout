@@ -1,0 +1,13 @@
+=== Binary name ===
+[[bin]]
+name = "wx"
+
+=== tests/ dir ===
+ls: cannot access 'tests/': No such file or directory
+no tests/ dir
+
+=== config sock/log paths ===
+89:pub fn cli_dir() -> PathBuf {
+95:pub fn sock_path() -> PathBuf {
+99:pub fn pid_path() -> PathBuf {
+103:pub fn log_path() -> PathBuf {

@@ -1,0 +1,18 @@
+{
+  "id": "77841434-4f83-4fc3-91fb-deb947c85254",
+  "runtime": "bash",
+  "purpose": "cargo check native",
+  "script_chars": 26,
+  "started_at": "2026-05-13T07:35:23.203Z",
+  "finished_at": "2026-05-13T07:35:26.124Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 2921,
+  "stdout_bytes": 265,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\77841434-4f83-4fc3-91fb-deb947c85254.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\77841434-4f83-4fc3-91fb-deb947c85254.stderr"
+}

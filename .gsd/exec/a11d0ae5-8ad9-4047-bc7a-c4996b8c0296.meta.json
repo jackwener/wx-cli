@@ -1,0 +1,18 @@
+{
+  "id": "a11d0ae5-8ad9-4047-bc7a-c4996b8c0296",
+  "runtime": "bash",
+  "purpose": "S02 planning: read transport and daemon source files",
+  "script_chars": 294,
+  "started_at": "2026-05-13T06:00:05.726Z",
+  "finished_at": "2026-05-13T06:00:05.908Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 182,
+  "stdout_bytes": 19522,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a11d0ae5-8ad9-4047-bc7a-c4996b8c0296.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a11d0ae5-8ad9-4047-bc7a-c4996b8c0296.stderr"
+}

@@ -1,0 +1,10 @@
+---- cli::transport::integration_tests::test_send_tcp_round_trip stdout ----
+
+thread 'cli::transport::integration_tests::test_send_tcp_round_trip' (2252) panicked at src/cli/transport.rs:374:81:
+called `Result::unwrap()` on an `Err` value: 连接 TCP daemon (127.0.0.1:46553) 失败
+
+Caused by:
+    connection timed out
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip stdout ----

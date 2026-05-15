@@ -1,0 +1,18 @@
+{
+  "id": "9dc4b51e-1485-4a19-86d9-4c25652d7ad3",
+  "runtime": "python",
+  "purpose": "check GSD DB schema",
+  "script_chars": 256,
+  "started_at": "2026-05-13T07:43:12.780Z",
+  "finished_at": "2026-05-13T07:43:12.973Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 193,
+  "stdout_bytes": 12,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9dc4b51e-1485-4a19-86d9-4c25652d7ad3.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9dc4b51e-1485-4a19-86d9-4c25652d7ad3.stderr"
+}

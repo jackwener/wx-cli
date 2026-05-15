@@ -1,0 +1,18 @@
+{
+  "id": "dfba8be2-20a2-4912-94fa-ba7d2fe93961",
+  "runtime": "bash",
+  "purpose": "Verify code changes for M001",
+  "script_chars": 85,
+  "started_at": "2026-05-13T06:49:07.518Z",
+  "finished_at": "2026-05-13T06:49:16.889Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 9371,
+  "stdout_bytes": 0,
+  "stderr_bytes": 131,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\dfba8be2-20a2-4912-94fa-ba7d2fe93961.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\dfba8be2-20a2-4912-94fa-ba7d2fe93961.stderr"
+}

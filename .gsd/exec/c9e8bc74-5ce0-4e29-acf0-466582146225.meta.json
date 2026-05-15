@@ -1,0 +1,18 @@
+{
+  "id": "c9e8bc74-5ce0-4e29-acf0-466582146225",
+  "runtime": "bash",
+  "purpose": "Find cli module files",
+  "script_chars": 172,
+  "started_at": "2026-05-13T06:00:41.854Z",
+  "finished_at": "2026-05-13T06:00:44.049Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 2195,
+  "stdout_bytes": 397,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\c9e8bc74-5ce0-4e29-acf0-466582146225.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\c9e8bc74-5ce0-4e29-acf0-466582146225.stderr"
+}

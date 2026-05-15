@@ -26,6 +26,10 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "wx", version = env!("CARGO_PKG_VERSION"), about = "wx — 微信本地数据 CLI")]
 pub struct Cli {
+    /// 通过 TCP 连接 daemon（如 127.0.0.1:9876）
+    #[arg(long, require_equals = true)]
+    pub tcp: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -324,57 +328,64 @@ pub enum DaemonCommands {
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
     },
+    /// 启动 daemon
+    Start {
+        /// 同时监听 TCP 地址（如 127.0.0.1:9876）
+        #[arg(long)]
+        tcp: Option<String>,
+    },
 }
 
 pub fn run() {
     let cli = Cli::parse();
-    if let Err(e) = dispatch(cli) {
+    let tcp_addr = cli.tcp.clone();
+    if let Err(e) = dispatch(cli, tcp_addr.as_deref()) {
         eprintln!("错误: {}", e);
         std::process::exit(1);
     }
 }
 
-fn dispatch(cli: Cli) -> Result<()> {
+fn dispatch(cli: Cli, tcp_addr: Option<&str>) -> Result<()> {
     match cli.command {
         Commands::Init { force } => init::cmd_init(force),
-        Commands::Sessions { limit, json } => sessions::cmd_sessions(limit, json),
+        Commands::Sessions { limit, json } => sessions::cmd_sessions(limit, json, tcp_addr),
         Commands::History { chat, limit, offset, since, until, msg_type, json } => {
-            history::cmd_history(chat, limit, offset, since, until, msg_type, json)
+            history::cmd_history(chat, limit, offset, since, until, msg_type, json, tcp_addr)
         }
         Commands::Search { keyword, chats, limit, since, until, msg_type, json } => {
-            search::cmd_search(keyword, chats, limit, since, until, msg_type, json)
+            search::cmd_search(keyword, chats, limit, since, until, msg_type, json, tcp_addr)
         }
-        Commands::Contacts { query, limit, json } => contacts::cmd_contacts(query, limit, json),
+        Commands::Contacts { query, limit, json } => contacts::cmd_contacts(query, limit, json, tcp_addr),
         Commands::Export { chat, since, until, limit, format, output } => {
-            export::cmd_export(chat, since, until, limit, format, output)
+            export::cmd_export(chat, since, until, limit, format, output, tcp_addr)
         }
-        Commands::Unread { limit, filter, json } => unread::cmd_unread(limit, filter, json),
-        Commands::Members { chat, json } => members::cmd_members(chat, json),
-        Commands::NewMessages { limit, json } => new_messages::cmd_new_messages(limit, json),
+        Commands::Unread { limit, filter, json } => unread::cmd_unread(limit, filter, json, tcp_addr),
+        Commands::Members { chat, json } => members::cmd_members(chat, json, tcp_addr),
+        Commands::NewMessages { limit, json } => new_messages::cmd_new_messages(limit, json, tcp_addr),
         Commands::Stats { chat, since, until, json } => {
-            stats::cmd_stats(chat, since, until, json)
+            stats::cmd_stats(chat, since, until, json, tcp_addr)
         }
         Commands::Favorites { limit, fav_type, query, json } => {
-            favorites::cmd_favorites(limit, fav_type, query, json)
+            favorites::cmd_favorites(limit, fav_type, query, json, tcp_addr)
         }
         Commands::SnsNotifications { limit, since, until, include_read, json } => {
-            sns_notifications::cmd_sns_notifications(limit, since, until, include_read, json)
+            sns_notifications::cmd_sns_notifications(limit, since, until, include_read, json, tcp_addr)
         }
         Commands::SnsFeed { limit, since, until, user, json } => {
-            sns_feed::cmd_sns_feed(limit, since, until, user, json)
+            sns_feed::cmd_sns_feed(limit, since, until, user, json, tcp_addr)
         }
         Commands::SnsSearch { keyword, limit, since, until, user, json } => {
-            sns_search::cmd_sns_search(keyword, limit, since, until, user, json)
+            sns_search::cmd_sns_search(keyword, limit, since, until, user, json, tcp_addr)
         }
         Commands::BizArticles { limit, account, since, until, unread, json } => {
-            biz_articles::cmd_biz_articles(limit, account, since, until, unread, json)
+            biz_articles::cmd_biz_articles(limit, account, since, until, unread, json, tcp_addr)
         }
         Commands::Attachments { chat, kinds, limit, offset, since, until, json } => {
-            attachments::cmd_attachments(chat, kinds, limit, offset, since, until, json)
+            attachments::cmd_attachments(chat, kinds, limit, offset, since, until, json, tcp_addr)
         }
         Commands::Extract { attachment_id, output, overwrite, json } => {
-            extract::cmd_extract(attachment_id, output, overwrite, json)
+            extract::cmd_extract(attachment_id, output, overwrite, json, tcp_addr)
         }
-        Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd),
+        Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd, tcp_addr),
     }
 }

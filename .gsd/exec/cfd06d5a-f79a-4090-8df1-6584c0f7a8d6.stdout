@@ -1,0 +1,20 @@
+test daemon::query::sns_tests::text_only_post ... ok
+test daemon::query::sns_tests::three_images_media ... ok
+test daemon::query::sns_tests::video_media ... ok
+test transport::tests::tcp_connector_rejects_non_tcp_addr ... ok
+test transport::tests::tcp_listener_implements_listener ... ok
+test transport::tests::transport_addr_variants ... ok
+test scanner::tests::test_read_db_salt_nonexistent ... ok
+test scanner::tests::test_collect_db_salts_ignores_non_db_extensions ... ok
+test scanner::tests::test_collect_db_salts_multiple_files_unique_salts ... ok
+test scanner::tests::test_collect_db_salts_empty_dir ... ok
+test scanner::tests::test_collect_db_salts_skips_plaintext_sqlite ... ok
+test scanner::tests::test_collect_db_salts_recursive ... ok
+test scanner::tests::test_read_db_salt_encrypted ... ok
+test scanner::tests::test_collect_db_salts_finds_encrypted ... ok
+test scanner::tests::test_read_db_salt_exactly_16_bytes ... ok
+test scanner::tests::test_read_db_salt_plaintext_sqlite ... ok
+test scanner::tests::test_read_db_salt_too_short ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

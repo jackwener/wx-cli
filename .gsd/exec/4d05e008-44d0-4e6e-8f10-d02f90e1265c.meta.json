@@ -1,0 +1,18 @@
+{
+  "id": "4d05e008-44d0-4e6e-8f10-d02f90e1265c",
+  "runtime": "python",
+  "purpose": "complete S04 tasks in real GSD DB",
+  "script_chars": 671,
+  "started_at": "2026-05-13T07:43:27.532Z",
+  "finished_at": "2026-05-13T07:43:27.744Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 212,
+  "stdout_bytes": 0,
+  "stderr_bytes": 367,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\4d05e008-44d0-4e6e-8f10-d02f90e1265c.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\4d05e008-44d0-4e6e-8f10-d02f90e1265c.stderr"
+}

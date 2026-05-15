@@ -1,0 +1,18 @@
+{
+  "id": "ec1b0003-89e2-419c-bfee-1c112f00a050",
+  "runtime": "bash",
+  "purpose": "Run daemon ping test to diagnose failures",
+  "script_chars": 112,
+  "started_at": "2026-05-13T06:52:13.477Z",
+  "finished_at": "2026-05-13T06:52:43.518Z",
+  "exit_code": null,
+  "signal": "SIGKILL",
+  "timed_out": true,
+  "duration_ms": 30041,
+  "stdout_bytes": 0,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ec1b0003-89e2-419c-bfee-1c112f00a050.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ec1b0003-89e2-419c-bfee-1c112f00a050.stderr"
+}

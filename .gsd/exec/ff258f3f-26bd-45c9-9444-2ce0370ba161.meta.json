@@ -1,0 +1,18 @@
+{
+  "id": "ff258f3f-26bd-45c9-9444-2ce0370ba161",
+  "runtime": "bash",
+  "purpose": "Verify code changes - Windows path",
+  "script_chars": 13,
+  "started_at": "2026-05-13T06:49:23.468Z",
+  "finished_at": "2026-05-13T06:49:23.702Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 234,
+  "stdout_bytes": 1212,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ff258f3f-26bd-45c9-9444-2ce0370ba161.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ff258f3f-26bd-45c9-9444-2ce0370ba161.stderr"
+}

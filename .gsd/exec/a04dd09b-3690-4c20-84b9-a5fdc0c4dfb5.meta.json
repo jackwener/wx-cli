@@ -1,0 +1,18 @@
+{
+  "id": "a04dd09b-3690-4c20-84b9-a5fdc0c4dfb5",
+  "runtime": "bash",
+  "purpose": "Check cargo build",
+  "script_chars": 35,
+  "started_at": "2026-05-13T06:58:30.575Z",
+  "finished_at": "2026-05-13T06:58:37.991Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 7416,
+  "stdout_bytes": 265,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a04dd09b-3690-4c20-84b9-a5fdc0c4dfb5.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a04dd09b-3690-4c20-84b9-a5fdc0c4dfb5.stderr"
+}

@@ -1,0 +1,79 @@
+=== TESTS ===
+src/daemon/query.rs:2025:    #[test]
+src/daemon/query.rs:2036:    #[test]
+src/daemon/query.rs:2043:    #[test]
+src/daemon/query.rs:2051:    #[test]
+src/daemon/query.rs:2059:    #[test]
+src/daemon/query.rs:2066:    #[test]
+src/daemon/query.rs:2076:    #[test]
+src/daemon/query.rs:2087:    #[test]
+src/daemon/query.rs:2097:    #[test]
+src/daemon/query.rs:2107:    #[test]
+src/daemon/query.rs:2115:    #[test]
+src/daemon/query.rs:2122:    #[test]
+src/daemon/query.rs:2133:    #[test]
+src/daemon/query.rs:2183:    #[test]
+src/daemon/query.rs:2238:    #[test]
+src/daemon/query.rs:2271:    #[test]
+src/daemon/query.rs:2296:    #[test]
+src/daemon/query.rs:2314:    #[test]
+src/scanner/macos.rs:321:    #[test]
+src/scanner/macos.rs:328:    #[test]
+src/scanner/macos.rs:335:    #[test]
+src/scanner/macos.rs:347:    #[test]
+src/scanner/macos.rs:360:    #[test]
+src/scanner/macos.rs:372:    #[test]
+src/scanner/macos.rs:383:    #[test]
+src/scanner/macos.rs:396:    #[test]
+src/scanner/macos.rs:411:    #[test]
+src/scanner/macos.rs:424:    #[test]
+src/scanner/macos.rs:433:    #[test]
+src/scanner/macos.rs:440:    #[test]
+=== HELP ===
+  sessions           列出最近会话
+  history            查看聊天记录
+  search             搜索消息
+  contacts           查看联系人
+  export             导出聊天记录到文件
+  unread             显示有未读消息的会话
+  members            查看群成员
+  new-messages       获取自上次检查以来的新消息
+  stats              聊天统计分析
+  favorites          查看微信收藏内容
+  sns-notifications  朋友圈互动通知：别人对我的朋友圈点赞/评论 + 我评过的帖子下的跟帖
+  sns-feed           朋友圈时间线：按时间/作者筛选本地缓存的朋友圈
+  sns-search         朋友圈全文搜索：匹配正文关键词
+  daemon             管理 wx-daemon
+  help               Print this message or the help of the given subcommand(s)
+
+Options:
+      --tcp <TCP>  通过 TCP 连接 daemon（如 127.0.0.1:9876）
+  -h, --help       Print help
+  -V, --version    Print version
+=== DAEMON HELP ===
+warning: unused config key `net.timeout` in `/mnt/c/Users/david/.cargo/config.toml`
+warning: unused config key `http.low-speed-timeout` in `/mnt/c/Users/david/.cargo/config.toml`
+warning: unused import: `bail`
+ --> src/scanner/linux.rs:6:14
+  |
+6 | use anyhow::{bail, Context, Result};
+  |              ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wx-cli` (bin "wx") generated 1 warning (run `cargo fix --bin "wx" -p wx-cli` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.66s
+     Running `target/debug/wx daemon --help`
+管理 wx-daemon
+
+Usage: wx daemon <COMMAND>
+
+Commands:
+  status  查看 daemon 运行状态
+  stop    停止 daemon
+  logs    查看 daemon 日志
+  start   启动 daemon
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

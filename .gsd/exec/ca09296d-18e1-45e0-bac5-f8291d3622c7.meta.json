@@ -1,0 +1,18 @@
+{
+  "id": "ca09296d-18e1-45e0-bac5-f8291d3622c7",
+  "runtime": "bash",
+  "purpose": "cross-platform check Windows MSVC",
+  "script_chars": 58,
+  "started_at": "2026-05-13T07:40:24.153Z",
+  "finished_at": "2026-05-13T07:40:42.567Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 18414,
+  "stdout_bytes": 99,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ca09296d-18e1-45e0-bac5-f8291d3622c7.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\ca09296d-18e1-45e0-bac5-f8291d3622c7.stderr"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "1f0820e5-c1cb-4200-8751-0f6d00dd3321",
+  "runtime": "bash",
+  "purpose": "S02: Verify TCP artifacts in source code",
+  "script_chars": 300,
+  "started_at": "2026-05-13T06:12:57.539Z",
+  "finished_at": "2026-05-13T06:13:57.561Z",
+  "exit_code": null,
+  "signal": "SIGKILL",
+  "timed_out": true,
+  "duration_ms": 60022,
+  "stdout_bytes": 82,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\1f0820e5-c1cb-4200-8751-0f6d00dd3321.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\1f0820e5-c1cb-4200-8751-0f6d00dd3321.stderr"
+}

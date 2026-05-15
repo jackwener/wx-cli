@@ -1,0 +1,28 @@
+test cli::transport::integration_tests::test_send_tcp_round_trip ... FAILED
+test cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip ... FAILED
+
+failures:
+
+---- cli::transport::integration_tests::test_send_tcp_round_trip stdout ----
+
+thread 'cli::transport::integration_tests::test_send_tcp_round_trip' (2000) panicked at src/cli/transport.rs:374:81:
+called `Result::unwrap()` on an `Err` value: 连接 TCP daemon (127.0.0.1:45175) 失败
+
+Caused by:
+    connection timed out
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip stdout ----
+[test] spawned daemon PID 2085
+
+thread 'cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip' (2002) panicked at src/cli/transport.rs:466:13:
+daemon did not become ready on 127.0.0.1:46229 within 15s (PID 2085)
+
+
+failures:
+    cli::transport::integration_tests::test_send_tcp_round_trip
+    cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip
+
+test result: FAILED. 35 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 17.69s
+
+error: test failed, to rerun pass `--bin wx`

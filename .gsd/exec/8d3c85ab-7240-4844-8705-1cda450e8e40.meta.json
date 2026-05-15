@@ -1,0 +1,18 @@
+{
+  "id": "8d3c85ab-7240-4844-8705-1cda450e8e40",
+  "runtime": "bash",
+  "purpose": "cargo check Windows MSVC target",
+  "script_chars": 58,
+  "started_at": "2026-05-13T06:56:01.074Z",
+  "finished_at": "2026-05-13T06:56:10.449Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 9375,
+  "stdout_bytes": 101,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\8d3c85ab-7240-4844-8705-1cda450e8e40.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\8d3c85ab-7240-4844-8705-1cda450e8e40.stderr"
+}

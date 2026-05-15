@@ -1,0 +1,20 @@
+test transport::tests::tcp_connector_rejects_non_tcp_addr ... ok
+test transport::tests::tcp_listener_implements_listener ... ok
+test transport::tests::transport_addr_variants ... ok
+test scanner::tests::test_read_db_salt_nonexistent ... ok
+test scanner::tests::test_collect_db_salts_recursive ... ok
+test scanner::tests::test_collect_db_salts_finds_encrypted ... ok
+test scanner::tests::test_collect_db_salts_skips_plaintext_sqlite ... ok
+test scanner::tests::test_collect_db_salts_multiple_files_unique_salts ... ok
+test scanner::tests::test_collect_db_salts_ignores_non_db_extensions ... ok
+test scanner::tests::test_collect_db_salts_empty_dir ... ok
+test scanner::tests::test_read_db_salt_encrypted ... ok
+test scanner::tests::test_read_db_salt_exactly_16_bytes ... ok
+test scanner::tests::test_read_db_salt_plaintext_sqlite ... ok
+test scanner::tests::test_read_db_salt_too_short ... ok
+test cli::transport::integration_tests::test_is_alive_tcp_false ... ok
+test cli::transport::integration_tests::test_send_tcp_connection_refused ... ok
+test cli::transport::integration_tests::test_send_tcp_round_trip ... FAILED
+test cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip ... FAILED
+test result: FAILED. 35 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 17.64s
+error: test failed, to rerun pass `--bin wx`

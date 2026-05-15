@@ -1,0 +1,18 @@
+{
+  "id": "63ae12c6-b02a-4a08-8c32-4a95f9c18277",
+  "runtime": "bash",
+  "purpose": "Cross-platform cargo check for M001",
+  "script_chars": 91,
+  "started_at": "2026-05-13T06:49:07.532Z",
+  "finished_at": "2026-05-13T06:49:16.843Z",
+  "exit_code": 1,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 9311,
+  "stdout_bytes": 0,
+  "stderr_bytes": 131,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\63ae12c6-b02a-4a08-8c32-4a95f9c18277.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\63ae12c6-b02a-4a08-8c32-4a95f9c18277.stderr"
+}

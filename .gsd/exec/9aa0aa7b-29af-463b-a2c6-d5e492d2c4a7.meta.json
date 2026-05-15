@@ -1,0 +1,18 @@
+{
+  "id": "9aa0aa7b-29af-463b-a2c6-d5e492d2c4a7",
+  "runtime": "bash",
+  "purpose": "S04 cross-platform check Windows",
+  "script_chars": 59,
+  "started_at": "2026-05-13T06:41:23.478Z",
+  "finished_at": "2026-05-13T06:41:54.732Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 31254,
+  "stdout_bytes": 255,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9aa0aa7b-29af-463b-a2c6-d5e492d2c4a7.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\9aa0aa7b-29af-463b-a2c6-d5e492d2c4a7.stderr"
+}

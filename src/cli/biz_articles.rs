@@ -11,6 +11,7 @@ pub fn cmd_biz_articles(
     until: Option<String>,
     unread: bool,
     json: bool,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
     let until_ts = until.as_deref().map(parse_time_end).transpose()?;
@@ -22,7 +23,7 @@ pub fn cmd_biz_articles(
         until: until_ts,
         unread,
     };
-    let resp = transport::send(req)?;
+    let resp = transport::send(req, tcp_addr)?;
     let data = resp.data.get("articles")
         .cloned()
         .unwrap_or(serde_json::Value::Array(vec![]));

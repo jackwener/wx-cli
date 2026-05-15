@@ -1,0 +1,18 @@
+{
+  "id": "559a734a-164d-4111-a1a9-3b1122cfea02",
+  "runtime": "bash",
+  "purpose": "Find existing tests and verify structure",
+  "script_chars": 261,
+  "started_at": "2026-05-13T06:18:41.973Z",
+  "finished_at": "2026-05-13T06:18:47.960Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 5987,
+  "stdout_bytes": 3046,
+  "stderr_bytes": 54,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\559a734a-164d-4111-a1a9-3b1122cfea02.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\559a734a-164d-4111-a1a9-3b1122cfea02.stderr"
+}

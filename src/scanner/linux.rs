@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use tracing::info;
 
 use super::{collect_db_salts, KeyEntry};
 
@@ -70,14 +71,14 @@ fn parse_maps(pid: u32) -> Result<Vec<(u64, u64)>> {
 pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
     let pid = find_wechat_pid()
         .context("找不到 WeChat 进程，请确认 WeChat 正在运行")?;
-    eprintln!("WeChat PID: {}", pid);
+    info!("WeChat PID: {}", pid);
 
     let db_salts = collect_db_salts(db_dir);
-    eprintln!("找到 {} 个加密数据库", db_salts.len());
+    info!("找到 {} 个加密数据库", db_salts.len());
 
-    eprintln!("扫描进程内存...");
+    info!("扫描进程内存...");
     let regions = parse_maps(pid)?;
-    eprintln!("找到 {} 个可读写内存区域", regions.len());
+    info!("找到 {} 个可读写内存区域", regions.len());
 
     let mem_path = format!("/proc/{}/mem", pid);
     let mut mem_file = std::fs::File::open(&mem_path)
@@ -87,7 +88,7 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
     for (start, end) in &regions {
         scan_region(&mut mem_file, *start, *end, &mut raw_keys);
     }
-    eprintln!("找到 {} 个候选密钥", raw_keys.len());
+    info!("找到 {} 个候选密钥", raw_keys.len());
 
     let mut entries = Vec::new();
     for (key_hex, salt_hex) in &raw_keys {
@@ -103,7 +104,7 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
         }
     }
 
-    eprintln!("匹配到 {}/{} 个密钥", entries.len(), raw_keys.len());
+    info!(matched = entries.len(), total = raw_keys.len(), "密钥匹配完成");
     Ok(entries)
 }
 

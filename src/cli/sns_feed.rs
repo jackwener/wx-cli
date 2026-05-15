@@ -10,6 +10,7 @@ pub fn cmd_sns_feed(
     until: Option<String>,
     user: Option<String>,
     json: bool,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
     let until_ts = until.as_deref().map(parse_time_end).transpose()?;
@@ -20,7 +21,7 @@ pub fn cmd_sns_feed(
         until: until_ts,
         user,
     };
-    let resp = transport::send(req)?;
+    let resp = transport::send(req, tcp_addr)?;
     let data = resp.data.get("posts")
         .cloned()
         .unwrap_or(serde_json::Value::Array(vec![]));

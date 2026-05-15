@@ -1,0 +1,4 @@
+running 38 tests
+test cli::transport::integration_tests::test_send_tcp_round_trip ... FAILED
+test cli::transport::tcp_integration_tests::test_tcp_daemon_ping_round_trip ... FAILED
+test result: FAILED. 35 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 17.71s

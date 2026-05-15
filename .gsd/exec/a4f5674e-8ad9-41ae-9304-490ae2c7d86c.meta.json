@@ -1,0 +1,18 @@
+{
+  "id": "a4f5674e-8ad9-41ae-9304-490ae2c7d86c",
+  "runtime": "python",
+  "purpose": "complete S04 T01 T02 in real DB",
+  "script_chars": 915,
+  "started_at": "2026-05-13T07:43:47.481Z",
+  "finished_at": "2026-05-13T07:43:47.671Z",
+  "exit_code": 0,
+  "signal": null,
+  "timed_out": false,
+  "duration_ms": 190,
+  "stdout_bytes": 246,
+  "stderr_bytes": 0,
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "stdout_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a4f5674e-8ad9-41ae-9304-490ae2c7d86c.stdout",
+  "stderr_path": "C:\\Users\\david\\Work\\wx-cli\\.gsd\\worktrees\\M001\\.gsd\\exec\\a4f5674e-8ad9-41ae-9304-490ae2c7d86c.stderr"
+}

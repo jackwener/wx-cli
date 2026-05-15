@@ -1,0 +1,83 @@
+=== FILES ===
+src/cli/contacts.rs
+src/cli/daemon_cmd.rs
+src/cli/export.rs
+src/cli/favorites.rs
+src/cli/history.rs
+src/cli/init.rs
+src/cli/members.rs
+src/cli/mod.rs
+src/cli/new_messages.rs
+src/cli/output.rs
+src/cli/search.rs
+src/cli/sessions.rs
+src/cli/sns_feed.rs
+src/cli/sns_notifications.rs
+src/cli/sns_search.rs
+src/cli/stats.rs
+src/cli/transport.rs
+src/cli/unread.rs
+src/config.rs
+src/crypto/mod.rs
+src/crypto/wal.rs
+src/daemon/cache.rs
+src/daemon/mod.rs
+src/daemon/query.rs
+src/daemon/server.rs
+src/ipc.rs
+src/main.rs
+src/scanner/linux.rs
+src/scanner/macos.rs
+src/scanner/mod.rs
+src/scanner/windows.rs
+src/transport/mod.rs
+=== CLI MOD ===
+28:    pub tcp: Option<String>,
+273:        tcp: Option<String>,
+279:    let tcp_addr = cli.tcp.clone();
+280:    if let Err(e) = dispatch(cli, tcp_addr.as_deref()) {
+286:fn dispatch(cli: Cli, tcp_addr: Option<&str>) -> Result<()> {
+289:        Commands::Sessions { limit, json } => sessions::cmd_sessions(limit, json, tcp_addr),
+291:            history::cmd_history(chat, limit, offset, since, until, msg_type, json, tcp_addr)
+294:            search::cmd_search(keyword, chats, limit, since, until, msg_type, json, tcp_addr)
+296:        Commands::Contacts { query, limit, json } => contacts::cmd_contacts(query, limit, json, tcp_addr),
+298:            export::cmd_export(chat, since, until, limit, format, output, tcp_addr)
+300:        Commands::Unread { limit, filter, json } => unread::cmd_unread(limit, filter, json, tcp_addr),
+301:        Commands::Members { chat, json } => members::cmd_members(chat, json, tcp_addr),
+302:        Commands::NewMessages { limit, json } => new_messages::cmd_new_messages(limit, json, tcp_addr),
+304:            stats::cmd_stats(chat, since, until, json, tcp_addr)
+307:            favorites::cmd_favorites(limit, fav_type, query, json, tcp_addr)
+310:            sns_notifications::cmd_sns_notifications(limit, since, until, include_read, json, tcp_addr)
+313:            sns_feed::cmd_sns_feed(limit, since, until, user, json, tcp_addr)
+316:            sns_search::cmd_sns_search(keyword, limit, since, until, user, json, tcp_addr)
+318:        Commands::Daemon { cmd } => daemon_cmd::cmd_daemon(cmd, tcp_addr),
+=== TRANSPORT ===
+14:pub fn is_alive(tcp_addr: Option<&str>) -> bool {
+15:    if let Some(addr) = tcp_addr {
+63:pub fn is_alive_tcp(addr: &str) -> bool {
+64:    let tcp_addr = match addr.parse() {
+69:        &tcp_addr,
+94:/// 当指定 tcp_addr 时，不会自动启动 daemon（用户显式选择了 TCP 模式）
+95:pub fn ensure_daemon(tcp_addr: Option<&str>) -> Result<()> {
+96:    if is_alive(tcp_addr) {
+101:    if tcp_addr.is_some() {
+102:        let addr = tcp_addr.unwrap();
+222:pub fn send(req: Request, tcp_addr: Option<&str>) -> Result<Response> {
+223:    if let Some(addr) = tcp_addr {
+244:pub fn send_tcp(req: Request, addr: &str) -> Result<Response> {
+276:fn send_unix(req: Request) -> Result<Response> {
+302:fn send_windows(req: Request) -> Result<Response> {
+=== SESSIONS ===
+6:pub fn cmd_sessions(limit: usize, json: bool, tcp_addr: Option<&str>) -> Result<()> {
+7:    let resp = transport::send(Request::Sessions { limit }, tcp_addr)?;
+=== CARGO CHECK ===
+warning: unused import: `bail`
+ --> src/scanner/linux.rs:6:14
+  |
+6 | use anyhow::{bail, Context, Result};
+  |              ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wx-cli` (bin "wx") generated 1 warning (run `cargo fix --bin "wx" -p wx-cli` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.34s

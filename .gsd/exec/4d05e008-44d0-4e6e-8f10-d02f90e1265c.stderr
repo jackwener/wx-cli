@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "<string>", line 7, in <module>
+    cur.execute("SELECT task_id, status FROM tasks WHERE milestone_id = 'M001' AND slice_id = 'S04' ORDER BY task_id")
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: no such column: task_id

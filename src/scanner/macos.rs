@@ -10,6 +10,7 @@
 /// 2. WeChat 需要进行 ad-hoc 签名
 /// 3. 在内存中搜索 x'<64hex><32hex>' 格式的 SQLCipher 密钥
 use anyhow::{bail, Context, Result};
+use tracing::info;
 use std::path::Path;
 
 use super::{collect_db_salts, KeyEntry};
@@ -101,7 +102,7 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
     // 1. 查找 WeChat PID
     let pid = find_wechat_pid()
         .context("找不到 WeChat 进程，请确认 WeChat 正在运行")?;
-    eprintln!("WeChat PID: {}", pid);
+    info!("WeChat PID: {}", pid);
 
     // 2. 获取 task port
     // SAFETY: task_for_pid 是标准 Mach API，参数合法
@@ -129,17 +130,17 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
         }
         task
     };
-    eprintln!("Got task port: {}", task);
+    debug!("Got task port: {}", task);
 
     // 3. 收集数据库 salt 映射
-    eprintln!("扫描数据库文件...");
+    info!("开始扫描数据库文件...");
     let db_salts = collect_db_salts(db_dir);
-    eprintln!("找到 {} 个加密数据库", db_salts.len());
+    info!("找到 {} 个加密数据库", db_salts.len());
 
     // 4. 扫描进程内存
-    eprintln!("扫描进程内存寻找密钥...");
+    info!("扫描进程内存寻找密钥...");
     let raw_keys = scan_memory(task)?;
-    eprintln!("找到 {} 个候选密钥", raw_keys.len());
+    info!("找到 {} 个候选密钥", raw_keys.len());
 
     // 5. 将密钥与数据库 salt 匹配
     let mut entries = Vec::new();
@@ -156,7 +157,7 @@ pub fn scan_keys(db_dir: &Path) -> Result<Vec<KeyEntry>> {
         }
     }
 
-    eprintln!("匹配到 {}/{} 个密钥", entries.len(), raw_keys.len());
+    info!(matched = entries.len(), total = raw_keys.len(), "密钥匹配完成");
     Ok(entries)
 }
 

@@ -17,6 +17,7 @@ pub fn cmd_attachments(
     since: Option<String>,
     until: Option<String>,
     json: bool,
+    tcp_addr: Option<&str>,
 ) -> Result<()> {
     let since_ts = since.as_deref().map(parse_time).transpose()?;
     let until_ts = until.as_deref().map(parse_time_end).transpose()?;
@@ -32,7 +33,7 @@ pub fn cmd_attachments(
         since: since_ts,
         until: until_ts,
     };
-    let resp = transport::send(req)?;
+    let resp = transport::send(req, tcp_addr)?;
     let data = resp
         .data
         .get("attachments")
