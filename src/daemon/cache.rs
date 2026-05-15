@@ -120,6 +120,11 @@ impl DbCache {
         keys
     }
 
+    pub async fn invalidate(&self, rel_key: &str) {
+        let mut inner = self.inner.lock().await;
+        inner.remove(rel_key);
+    }
+
     /// 从持久化文件加载 mtime 记录，复用未过期的解密文件
     async fn load_persistent(&self) {
         let mtime_file = &self.mtime_file;

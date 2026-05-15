@@ -148,47 +148,52 @@ async fn dispatch(
 ) -> Response {
     use crate::ipc::Request::*;
 
-    let names_arc = current_names(db, names).await;
-
     match req {
         Ping => Response::ok(serde_json::json!({ "pong": true })),
         Sessions { limit } => {
+            let names_arc = current_names(db, names).await;
             match query::q_sessions(db, &names_arc, limit).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         History { chat, limit, offset, since, until, msg_type } => {
+            let names_arc = current_names(db, names).await;
             match query::q_history(db, &names_arc, &chat, limit, offset, since, until, msg_type).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         Search { keyword, chats, limit, since, until, msg_type } => {
+            let names_arc = current_names(db, names).await;
             match query::q_search(db, &names_arc, &keyword, chats, limit, since, until, msg_type).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         Contacts { query, limit } => {
+            let names_arc = current_names(db, names).await;
             match query::q_contacts(&names_arc, query.as_deref(), limit).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         Unread { limit, filter } => {
+            let names_arc = current_names(db, names).await;
             match query::q_unread(db, &names_arc, limit, filter).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         Members { chat } => {
+            let names_arc = current_names(db, names).await;
             match query::q_members(db, &names_arc, &chat).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         NewMessages { state, limit } => {
+            let names_arc = current_names(db, names).await;
             match query::q_new_messages(db, &names_arc, state, limit).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
@@ -201,24 +206,28 @@ async fn dispatch(
             }
         }
         Stats { chat, since, until } => {
+            let names_arc = current_names(db, names).await;
             match query::q_stats(db, &names_arc, &chat, since, until).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         SnsNotifications { limit, since, until, include_read } => {
+            let names_arc = current_names(db, names).await;
             match query::q_sns_notifications(db, &names_arc, limit, since, until, include_read).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         SnsFeed { limit, since, until, user } => {
+            let names_arc = current_names(db, names).await;
             match query::q_sns_feed(db, &names_arc, limit, since, until, user.as_deref()).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         SnsSearch { keyword, limit, since, until, user } => {
+            let names_arc = current_names(db, names).await;
             match query::q_sns_search(db, &names_arc, &keyword, limit, since, until, user.as_deref()).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
@@ -228,18 +237,21 @@ async fn dispatch(
             Response::ok(serde_json::json!({ "reloading": true }))
         }
         BizArticles { limit, account, since, until, unread } => {
+            let names_arc = current_names(db, names).await;
             match query::q_biz_articles(db, &names_arc, limit, account, since, until, unread).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         Attachments { chat, kinds, limit, offset, since, until } => {
+            let names_arc = current_names(db, names).await;
             match query::q_attachments(db, &names_arc, &chat, kinds, limit, offset, since, until).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
             }
         }
         Extract { attachment_id, output, overwrite } => {
+            let names_arc = current_names(db, names).await;
             match query::q_extract(db, &names_arc, &attachment_id, &output, overwrite).await {
                 Ok(v) => Response::ok(v),
                 Err(e) => Response::err(e.to_string()),
@@ -269,6 +281,7 @@ async fn current_names(
         }
         Err(e) => {
             eprintln!("[daemon] 刷新联系人失败: {}", e);
+            db.invalidate("contact/contact.db").await;
             Arc::clone(&*guard)
         }
     }
