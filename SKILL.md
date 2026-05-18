@@ -159,6 +159,8 @@ wx search "会议" --in "工作群" --since 2026-01-01
 
 群聊消息里的 `last_sender`、`sender` 和 `stats.top_senders` 会优先显示群昵称（群名片）。如果本地数据库没有群昵称，再回退到联系人备注、微信昵称或 username。
 
+`history` / `search` / `new-messages` / `attachments` 和 `stats.top_senders` 在群上下文里同时输出稳定身份三件套：`sender_username`（稳定 wxid，用来区分同名成员）/ `sender_contact_display`（备注 > 昵称 > wxid 兜底）/ `sender_group_nickname`（群名片，等价于 `sender` 的来源，免去再做字符串解析）。当 wxid 解析不到时，这三字段不会输出，避免空字符串污染下游过滤。
+
 `sessions` / `unread` / `history` / `search` / `new-messages` / `stats` / `attachments` 的 stdout 现在统一是 wrapper：
 
 ```json
@@ -280,7 +282,7 @@ wx extract <attachment_id> -o ~/Desktop/photo.jpg
 wx extract <attachment_id> -o /tmp/x.jpg --overwrite
 ```
 
-`attachments` 输出每条带：`attachment_id` / `kind`（当前固定 `image`）/ `type` / `local_id` / `timestamp` / `time`，群聊里另带 `sender`。命令名保留成 `attachments` 是为了后续扩到其他附件类型时不 break CLI。
+`attachments` 输出每条带：`attachment_id` / `kind`（当前固定 `image`）/ `type` / `local_id` / `timestamp` / `time`，群聊里另带 `sender` 和稳定身份三件套（同上文）。命令名保留成 `attachments` 是为了后续扩到其他附件类型时不 break CLI。
 
 `extract` 报告里带：`md5` / `dat_path` / `dat_size` / `output` / `output_size` / `format`（实际识别出的图片格式：jpg / png / gif / webp / hevc 等）/ `decoder`（实际选用的解码器：`legacy_xor` / `v1_aes` / `v2`）。
 

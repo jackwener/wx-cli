@@ -2285,6 +2285,68 @@ mod appmsg_tests {
         assert_eq!(rows[0]["sender_group_nickname"].as_str(), Some("同名"));
     }
 
+    /// q_attachments 是异步 + 依赖 DbCache，无法直接 unit-test 整条 pipeline。
+    /// 这里锁住 attachment row 复用 `add_sender_identity` 后的最终 JSON 形状：
+    /// 两个 group nickname 同为 "同名" 的成员，attachment 行可以通过 sender_username 区分。
+    #[test]
+    fn attachment_row_gets_stable_group_sender_identity_via_helper() {
+        let names: HashMap<String, String> = HashMap::from([
+            ("wxid_alice".to_string(), "Alice Contact".to_string()),
+            ("wxid_bob".to_string(), "Bob Contact".to_string()),
+        ]);
+        let group_nicknames: HashMap<String, String> = HashMap::from([
+            ("wxid_alice".to_string(), "同名".to_string()),
+            ("wxid_bob".to_string(), "同名".to_string()),
+        ]);
+
+        let mut alice_row = json!({
+            "attachment_id": "abc",
+            "kind": "image",
+            "type": "Image",
+            "local_id": 1,
+            "timestamp": 1775146911,
+            "time": "2026-04-30 12:00",
+            "sender": "同名",
+        });
+        add_sender_identity(&mut alice_row, true, "wxid_alice", &names, &group_nicknames);
+        assert_eq!(alice_row["sender"].as_str(), Some("同名"));
+        assert_eq!(alice_row["sender_username"].as_str(), Some("wxid_alice"));
+        assert_eq!(alice_row["sender_contact_display"].as_str(), Some("Alice Contact"));
+        assert_eq!(alice_row["sender_group_nickname"].as_str(), Some("同名"));
+
+        let mut bob_row = json!({
+            "attachment_id": "def",
+            "kind": "image",
+            "type": "Image",
+            "local_id": 2,
+            "timestamp": 1775146922,
+            "time": "2026-04-30 12:00",
+            "sender": "同名",
+        });
+        add_sender_identity(&mut bob_row, true, "wxid_bob", &names, &group_nicknames);
+        assert_eq!(bob_row["sender_username"].as_str(), Some("wxid_bob"));
+        // 同样 sender_group_nickname 都是 "同名"，但 sender_username 能区分
+        assert_ne!(
+            alice_row["sender_username"], bob_row["sender_username"],
+            "sender_username 必须区分两位同名成员"
+        );
+
+        // 非群 chat 不该追加 identity 字段（行为对齐 history/search/new-messages）
+        let mut private_row = json!({"attachment_id": "ghi", "sender": ""});
+        add_sender_identity(&mut private_row, false, "wxid_alice", &names, &group_nicknames);
+        assert!(private_row.get("sender_username").is_none());
+        assert!(private_row.get("sender_contact_display").is_none());
+        assert!(private_row.get("sender_group_nickname").is_none());
+
+        // group 但 sender_username 解析为空（非常老的格式、id2u 没命中、content 也没 wxid_xxx:\n 前缀）：
+        // 不要伪造空字段，整段 identity 也不追加
+        let mut unknown_row = json!({"attachment_id": "jkl", "sender": ""});
+        add_sender_identity(&mut unknown_row, true, "", &names, &group_nicknames);
+        assert!(unknown_row.get("sender_username").is_none());
+        assert!(unknown_row.get("sender_contact_display").is_none());
+        assert!(unknown_row.get("sender_group_nickname").is_none());
+    }
+
     #[test]
     fn search_in_table_filters_appmsg_by_base_type() {
         let conn = Connection::open_in_memory().expect("open in-memory db");
@@ -4236,9 +4298,12 @@ pub async fn q_attachments(
         HashMap::new()
     };
 
-    let mut all_rows: Vec<(i64, i64, i64, i64, String, i64, i64)> = Vec::new();
+    let mut all_rows: Vec<(i64, i64, i64, i64, String, String, i64, i64)> = Vec::new();
     let mut shard_hits = 0usize;
-    // 元组：(local_id, local_type_lo32, create_time, real_sender_id, sender_label, ts_for_sort, db_idx)
+    // 元组：(local_id, local_type_lo32, create_time, real_sender_id, sender_label,
+    //        sender_username, ts_for_sort, db_idx)
+    // sender_username 是稳定 wxid，用来让 sender_contact_display / sender_group_nickname
+    // 落在 attachment row 上（消除"两个同名成员的图分不清谁发的"歧义）。
     for (db_idx, shard) in shards.iter().enumerate() {
         let path = shard.path.clone();
         let tname = shard.table.clone();
@@ -4253,7 +4318,7 @@ pub async fn q_attachments(
         let per_db_cap = (offset + limit).max(limit) * 2;
         let db_idx2 = db_idx as i64;
 
-        let rows: Vec<(i64, i64, i64, i64, String, i64, i64)> =
+        let rows: Vec<(i64, i64, i64, i64, String, String, i64, i64)> =
             tokio::task::spawn_blocking(move || {
                 let conn = Connection::open(&path)?;
                 let id2u = load_id2u(&conn);
@@ -4291,7 +4356,7 @@ pub async fn q_attachments(
                 let params_ref: Vec<&dyn rusqlite::types::ToSql> =
                     params.iter().map(|p| p.as_ref()).collect();
                 let mut stmt = conn.prepare(&sql)?;
-                let rows: Vec<(i64, i64, i64, i64, String, i64, i64)> = stmt
+                let rows: Vec<(i64, i64, i64, i64, String, String, i64, i64)> = stmt
                     .query_map(params_ref.as_slice(), |row| {
                         let local_id: i64 = row.get(0)?;
                         let raw_type: i64 = row.get(1)?;
@@ -4301,20 +4366,29 @@ pub async fn q_attachments(
                         let content_bytes = get_content_bytes(row, 4);
                         let ct: i64 = row.get::<_, i64>(5).unwrap_or(0);
                         let content = decompress_message(&content_bytes, ct);
-                        let sender = if is_group2 {
-                            sender_label(
-                                real_sender_id,
-                                &content,
-                                true,
-                                &uname,
-                                &id2u,
-                                &names_map,
-                                &group_nicknames2,
+                        let (sender, sender_uname) = if is_group2 {
+                            (
+                                sender_label(
+                                    real_sender_id,
+                                    &content,
+                                    true,
+                                    &uname,
+                                    &id2u,
+                                    &names_map,
+                                    &group_nicknames2,
+                                ),
+                                sender_username(
+                                    real_sender_id,
+                                    &content,
+                                    true,
+                                    &uname,
+                                    &id2u,
+                                ),
                             )
                         } else {
-                            String::new()
+                            (String::new(), String::new())
                         };
-                        Ok((local_id, lo32, ts, real_sender_id, sender, ts, db_idx2))
+                        Ok((local_id, lo32, ts, real_sender_id, sender, sender_uname, ts, db_idx2))
                     })?
                     .filter_map(|r| r.ok())
                     .collect();
@@ -4327,13 +4401,13 @@ pub async fn q_attachments(
         all_rows.extend(rows);
     }
 
-    // 全局按 ts DESC 排序后分页
-    all_rows.sort_by_key(|r| std::cmp::Reverse(r.5));
+    // 全局按 ts DESC 排序后分页（ts_for_sort 在 tuple index 6）
+    all_rows.sort_by_key(|r| std::cmp::Reverse(r.6));
     let paged: Vec<_> = all_rows.into_iter().skip(offset).take(limit).collect();
 
     // 翻成 JSON
     let mut results: Vec<Value> = Vec::with_capacity(paged.len());
-    for (local_id, lo32, ts, _real_sender_id, sender, _ts2, _db_idx) in paged {
+    for (local_id, lo32, ts, _real_sender_id, sender, sender_uname, _ts2, _db_idx) in paged {
         let kind = type_to_kind
             .get(&lo32)
             .copied()
@@ -4359,6 +4433,7 @@ pub async fn q_attachments(
         if is_group && !sender.is_empty() {
             row["sender"] = Value::String(sender);
         }
+        add_sender_identity(&mut row, is_group, &sender_uname, &names.map, &group_nicknames);
         results.push(row);
     }
     let unknown_shards = current_unknown_shards(db, names);
